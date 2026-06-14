@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JIN | Profile</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Noto+Sans+JP:wght@300;400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg: #0d0d0f;
+      --surface: #141417;
+      --border: #2a2a30;
+      --accent: #c9a96e;
+      --accent-soft: rgba(201, 169, 110, 0.12);
+      --text-primary: #e8e4de;
+      --text-muted: #7a7670;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text-primary);
+      font-family: 'Noto Sans JP', sans-serif;
+      font-weight: 300;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow-x: hidden;
+    }
+
+    /* Ambient light blobs */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -20%;
+      left: -10%;
+      width: 60vw;
+      height: 60vw;
+      background: radial-gradient(circle, rgba(201,169,110,0.04) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    body::after {
+      content: '';
+      position: fixed;
+      bottom: -20%;
+      right: -10%;
+      width: 50vw;
+      height: 50vw;
+      background: radial-gradient(circle, rgba(120,100,160,0.05) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 680px;
+      padding: 2rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* ── Hero ── */
+    .hero {
+      text-align: center;
+      padding: 4rem 0 3rem;
+      position: relative;
+    }
+
+    .hero-line {
+      width: 1px;
+      height: 60px;
+      background: linear-gradient(to bottom, transparent, var(--accent));
+      margin: 0 auto 2rem;
+    }
+
+    .hero-name {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: clamp(4rem, 12vw, 6.5rem);
+      font-weight: 300;
+      letter-spacing: 0.18em;
+      line-height: 1;
+      background: linear-gradient(135deg, #e8e4de 30%, var(--accent) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero-subtitle {
+      margin-top: 1rem;
+      font-size: 0.7rem;
+      letter-spacing: 0.4em;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+
+    .hero-line-bottom {
+      width: 1px;
+      height: 60px;
+      background: linear-gradient(to bottom, var(--accent), transparent);
+      margin: 2rem auto 0;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      padding: 2.5rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: linear-gradient(to right, transparent, var(--accent), transparent);
+    }
+
+    /* ── Section ── */
+    .section {
+      margin-bottom: 2.5rem;
+    }
+
+    .section:last-child {
+      margin-bottom: 0;
+    }
+
+    .section-label {
+      font-size: 0.62rem;
+      letter-spacing: 0.35em;
+      color: var(--accent);
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .section-label::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ── About ── */
+    .about-text {
+      font-size: 0.95rem;
+      line-height: 2;
+      color: #c0bbb4;
+      font-family: 'Noto Sans JP', sans-serif;
+      font-weight: 300;
+    }
+
+    /* ── Hobby ── */
+    .hobby-card {
+      display: flex;
+      align-items: flex-start;
+      gap: 1.25rem;
+      background: var(--accent-soft);
+      border: 1px solid rgba(201, 169, 110, 0.15);
+      border-radius: 2px;
+      padding: 1.5rem;
+    }
+
+    .hobby-icon {
+      font-size: 2rem;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+
+    .hobby-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 1.4rem;
+      font-weight: 300;
+      color: var(--accent);
+      letter-spacing: 0.05em;
+      margin-bottom: 0.4rem;
+    }
+
+    .hobby-desc {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      line-height: 1.8;
+      letter-spacing: 0.03em;
+    }
+
+    /* ── Divider ── */
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 2.5rem 0;
+    }
+
+    /* ── Nail art decoration ── */
+    .nail-dots {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: center;
+      margin-top: 2rem;
+    }
+
+    .nail-dot {
+      width: 10px;
+      height: 14px;
+      border-radius: 5px 5px 4px 4px;
+      opacity: 0.7;
+    }
+
+    .nail-dot:nth-child(1) { background: #c9a96e; }
+    .nail-dot:nth-child(2) { background: #b08fb8; }
+    .nail-dot:nth-child(3) { background: #e8c4c4; }
+    .nail-dot:nth-child(4) { background: #8fc4b0; }
+    .nail-dot:nth-child(5) { background: #c9a96e; opacity: 0.4; }
+
+    /* ── Footer ── */
+    .footer {
+      text-align: center;
+      padding: 2rem 0 1rem;
+      font-size: 0.62rem;
+      letter-spacing: 0.3em;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+
+    /* ── Fade-in animation ── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .hero    { animation: fadeUp 0.9s ease both; }
+    .card    { animation: fadeUp 0.9s ease 0.2s both; }
+    .footer  { animation: fadeUp 0.9s ease 0.35s both; }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <div class="hero">
+      <div class="hero-line"></div>
+      <h1 class="hero-name">JIN</h1>
+      <p class="hero-subtitle">Self Introduction</p>
+      <div class="hero-line-bottom"></div>
+    </div>
+
+    <div class="card">
+
+      <div class="section">
+        <div class="section-label">About</div>
+        <p class="about-text">
+          はじめまして、<strong style="color:var(--accent);font-weight:400;">JIN</strong> です。<br>
+          日常の中に小さな美しさを見つけることが好きです。<br>
+          細部へのこだわりと、丁寧に作り上げることを大切にしています。
+        </p>
+      </div>
+
+      <hr class="divider">
+
+      <div class="section">
+        <div class="section-label">Hobby</div>
+        <div class="hobby-card">
+          <div class="hobby-icon">💅</div>
+          <div>
+            <div class="hobby-title">Gel Nail</div>
+            <div class="hobby-desc">
+              ジェルネイルが大好きです。季節や気分に合わせてデザインを考える時間がとても楽しく、
+              指先のアートを通じて自分らしさを表現しています。
+              細かい作業に集中するひとときが、心を整えてくれます。
+            </div>
+          </div>
+        </div>
+
+        <div class="nail-dots">
+          <div class="nail-dot"></div>
+          <div class="nail-dot"></div>
+          <div class="nail-dot"></div>
+          <div class="nail-dot"></div>
+          <div class="nail-dot"></div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="footer">
+      &copy; 2026 &nbsp;·&nbsp; JIN
+    </div>
+
+  </div>
+</body>
+</html>

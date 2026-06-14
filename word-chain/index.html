@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ワード連想チェーン</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Hiragino Kaku Gothic Pro', 'Meiryo', sans-serif;
+    background: #0f0f1a;
+    color: #e0e0f0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+
+  h1 {
+    font-size: 1.8rem;
+    letter-spacing: 0.1em;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, #a78bfa, #60a5fa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .subtitle {
+    font-size: 0.85rem;
+    color: #6b6b8a;
+    margin-bottom: 32px;
+  }
+
+  /* ---- SCREEN MANAGEMENT ---- */
+  .screen { display: none; flex-direction: column; align-items: center; width: 100%; max-width: 560px; }
+  .screen.active { display: flex; }
+
+  /* ---- START SCREEN ---- */
+  .mode-buttons { display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; justify-content: center; }
+
+  .mode-btn {
+    padding: 14px 28px;
+    border-radius: 12px;
+    border: 2px solid transparent;
+    font-size: 1rem;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-weight: bold;
+    letter-spacing: 0.05em;
+  }
+
+  .mode-btn.relaxed {
+    background: #1e1e35;
+    border-color: #a78bfa;
+    color: #a78bfa;
+  }
+  .mode-btn.relaxed:hover { background: #2a2048; }
+
+  .mode-btn.timed {
+    background: #1e1e35;
+    border-color: #f59e0b;
+    color: #f59e0b;
+  }
+  .mode-btn.timed:hover { background: #2a2010; }
+
+  .rules {
+    background: #1a1a2e;
+    border-radius: 12px;
+    padding: 16px 20px;
+    font-size: 0.85rem;
+    color: #8888aa;
+    line-height: 1.8;
+    text-align: left;
+    width: 100%;
+  }
+
+  /* ---- GAME SCREEN ---- */
+  .hud {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    margin-bottom: 24px;
+  }
+
+  .score-box, .timer-box {
+    background: #1a1a2e;
+    border-radius: 10px;
+    padding: 10px 20px;
+    text-align: center;
+  }
+
+  .score-box .label, .timer-box .label { font-size: 0.7rem; color: #6b6b8a; letter-spacing: 0.1em; }
+  .score-box .value { font-size: 1.6rem; font-weight: bold; color: #a78bfa; }
+  .timer-box .value { font-size: 1.6rem; font-weight: bold; color: #f59e0b; }
+  .timer-box.warning .value { color: #ef4444; animation: pulse 0.5s infinite alternate; }
+
+  @keyframes pulse { from { opacity: 1; } to { opacity: 0.5; } }
+
+  /* chain display */
+  .chain-display {
+    width: 100%;
+    background: #1a1a2e;
+    border-radius: 14px;
+    padding: 16px;
+    min-height: 80px;
+    margin-bottom: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .chain-word {
+    background: #252545;
+    border-radius: 8px;
+    padding: 5px 12px;
+    font-size: 0.9rem;
+    color: #c4b5fd;
+    position: relative;
+    animation: popIn 0.25s cubic-bezier(0.34,1.56,0.64,1);
+  }
+
+  @keyframes popIn {
+    from { transform: scale(0.4); opacity: 0; }
+    to   { transform: scale(1);   opacity: 1; }
+  }
+
+  .chain-arrow { color: #3a3a60; font-size: 0.8rem; }
+
+  /* current prompt */
+  .prompt-area { text-align: center; margin-bottom: 20px; }
+  .prompt-label { font-size: 0.75rem; color: #6b6b8a; letter-spacing: 0.1em; margin-bottom: 6px; }
+
+  .current-word {
+    font-size: 2.2rem;
+    font-weight: bold;
+    color: #fff;
+    letter-spacing: 0.05em;
+    min-height: 56px;
+  }
+
+  /* input */
+  .input-row {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+    margin-bottom: 12px;
+  }
+
+  #word-input {
+    flex: 1;
+    background: #1a1a2e;
+    border: 2px solid #333355;
+    border-radius: 12px;
+    padding: 14px 18px;
+    font-size: 1.1rem;
+    font-family: inherit;
+    color: #e0e0f0;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  #word-input:focus { border-color: #a78bfa; }
+  #word-input.error { border-color: #ef4444; animation: shake 0.3s; }
+  #word-input.success { border-color: #34d399; }
+
+  @keyframes shake {
+    0%,100% { transform: translateX(0); }
+    25% { transform: translateX(-6px); }
+    75% { transform: translateX(6px); }
+  }
+
+  .submit-btn {
+    background: linear-gradient(135deg, #a78bfa, #60a5fa);
+    border: none;
+    border-radius: 12px;
+    padding: 14px 20px;
+    font-size: 1.1rem;
+    cursor: pointer;
+    color: white;
+    font-weight: bold;
+    transition: opacity 0.2s, transform 0.1s;
+  }
+  .submit-btn:hover { opacity: 0.9; }
+  .submit-btn:active { transform: scale(0.96); }
+
+  .error-msg {
+    font-size: 0.8rem;
+    color: #ef4444;
+    min-height: 20px;
+    text-align: center;
+  }
+
+  .pass-btn {
+    background: none;
+    border: 1px solid #333355;
+    border-radius: 8px;
+    padding: 6px 16px;
+    font-size: 0.8rem;
+    color: #6b6b8a;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s;
+    margin-top: 4px;
+  }
+  .pass-btn:hover { border-color: #6b6b8a; color: #a0a0c0; }
+
+  /* ---- RESULT SCREEN ---- */
+  .result-icon { font-size: 3rem; margin-bottom: 12px; }
+
+  .result-score {
+    font-size: 3.5rem;
+    font-weight: bold;
+    color: #a78bfa;
+    margin-bottom: 4px;
+  }
+
+  .result-label { font-size: 0.85rem; color: #6b6b8a; margin-bottom: 24px; }
+
+  .final-chain {
+    width: 100%;
+    background: #1a1a2e;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 24px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .final-word {
+    background: #252545;
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.85rem;
+    color: #c4b5fd;
+  }
+
+  .restart-btn {
+    background: linear-gradient(135deg, #a78bfa, #60a5fa);
+    border: none;
+    border-radius: 12px;
+    padding: 14px 36px;
+    font-size: 1rem;
+    cursor: pointer;
+    color: white;
+    font-weight: bold;
+    letter-spacing: 0.05em;
+    font-family: inherit;
+    transition: opacity 0.2s;
+  }
+  .restart-btn:hover { opacity: 0.85; }
+</style>
+</head>
+<body>
+
+<h1>ワード連想チェーン</h1>
+<p class="subtitle">思い浮かんだ言葉をどんどんつなごう</p>
+
+<!-- START SCREEN -->
+<div class="screen active" id="start-screen">
+  <div class="mode-buttons">
+    <button class="mode-btn relaxed" onclick="startGame('relaxed')">
+      🌙 のんびりモード
+    </button>
+    <button class="mode-btn timed" onclick="startGame('timed')">
+      ⚡ タイムアタック（60秒）
+    </button>
+  </div>
+  <div class="rules">
+    <strong style="color:#c4b5fd">遊び方</strong><br>
+    表示された単語から自由に連想して、次の言葉を入力。<br>
+    例：<span style="color:#a78bfa">猫</span> → <span style="color:#a78bfa">魚</span> → <span style="color:#a78bfa">海</span> → <span style="color:#a78bfa">波</span>…<br><br>
+    ・同じ言葉は使えません<br>
+    ・スコアはチェーンの長さ<br>
+    ・「パス」で別の言葉にスキップ（スコアなし）
+  </div>
+</div>
+
+<!-- GAME SCREEN -->
+<div class="screen" id="game-screen">
+  <div class="hud">
+    <div class="score-box">
+      <div class="label">スコア</div>
+      <div class="value" id="score-display">0</div>
+    </div>
+    <div class="timer-box" id="timer-box" style="display:none">
+      <div class="label">残り時間</div>
+      <div class="value" id="timer-display">60</div>
+    </div>
+  </div>
+
+  <div class="chain-display" id="chain-display">
+    <span style="color:#3a3a60;font-size:0.85rem">チェーンがここに表示されます…</span>
+  </div>
+
+  <div class="prompt-area">
+    <div class="prompt-label">この言葉から連想すると…？</div>
+    <div class="current-word" id="current-word">―</div>
+  </div>
+
+  <div class="input-row">
+    <input id="word-input" type="text" placeholder="次の言葉を入力" autocomplete="off" maxlength="20">
+    <button class="submit-btn" onclick="submitWord()">→</button>
+  </div>
+
+  <div class="error-msg" id="error-msg"></div>
+  <button class="pass-btn" onclick="passWord()">別の言葉にパス（スコアなし）</button>
+</div>
+
+<!-- RESULT SCREEN -->
+<div class="screen" id="result-screen">
+  <div class="result-icon" id="result-icon">🎉</div>
+  <div class="result-score" id="result-score">0</div>
+  <div class="result-label" id="result-label">ワードつないだ！</div>
+  <div class="final-chain" id="final-chain"></div>
+  <button class="restart-btn" onclick="showStart()">もう一度</button>
+</div>
+
+<script>
+// ---- SEED WORDS (Japanese) ----
+const seedWords = [
+  '猫','空','海','山','花','月','星','風','火','水',
+  '春','夏','秋','冬','音楽','夢','光','影','時間','旅',
+  '本','食べ物','太陽','雨','森','川','橋','道','家','学校'
+];
+
+// ---- STATE ----
+let chain = [];
+let usedWords = new Set();
+let score = 0;
+let mode = 'relaxed';
+let timeLeft = 60;
+let timerInterval = null;
+
+// ---- NAVIGATION ----
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+function showStart() {
+  clearInterval(timerInterval);
+  showScreen('start-screen');
+}
+
+// ---- GAME START ----
+function startGame(m) {
+  mode = m;
+  chain = [];
+  usedWords = new Set();
+  score = 0;
+  timeLeft = 60;
+  clearInterval(timerInterval);
+
+  const seed = seedWords[Math.floor(Math.random() * seedWords.length)];
+  chain.push(seed);
+  usedWords.add(seed);
+
+  document.getElementById('score-display').textContent = '0';
+  document.getElementById('current-word').textContent = seed;
+  document.getElementById('error-msg').textContent = '';
+  document.getElementById('word-input').value = '';
+  document.getElementById('word-input').className = '';
+  renderChain();
+
+  if (mode === 'timed') {
+    const timerBox = document.getElementById('timer-box');
+    timerBox.style.display = '';
+    timerBox.classList.remove('warning');
+    document.getElementById('timer-display').textContent = '60';
+    timerInterval = setInterval(tick, 1000);
+  } else {
+    document.getElementById('timer-box').style.display = 'none';
+  }
+
+  showScreen('game-screen');
+  setTimeout(() => document.getElementById('word-input').focus(), 100);
+}
+
+function tick() {
+  timeLeft--;
+  document.getElementById('timer-display').textContent = timeLeft;
+  if (timeLeft <= 10) {
+    document.getElementById('timer-box').classList.add('warning');
+  }
+  if (timeLeft <= 0) {
+    clearInterval(timerInterval);
+    endGame();
+  }
+}
+
+// ---- SUBMIT ----
+function submitWord() {
+  const input = document.getElementById('word-input');
+  const word = input.value.trim();
+  if (!word) return;
+
+  if (usedWords.has(word)) {
+    showError('その言葉はもう使われています！');
+    flashInput('error');
+    return;
+  }
+
+  if (word.length < 1) {
+    showError('1文字以上入力してください');
+    return;
+  }
+
+  // accept any word — free association!
+  usedWords.add(word);
+  chain.push(word);
+  score++;
+
+  document.getElementById('score-display').textContent = score;
+  document.getElementById('current-word').textContent = word;
+  document.getElementById('error-msg').textContent = '';
+  input.value = '';
+  flashInput('success');
+  renderChain();
+
+  if (mode === 'relaxed') {
+    // no end condition — go forever
+  }
+}
+
+function passWord() {
+  const seed = seedWords.filter(w => !usedWords.has(w));
+  if (seed.length === 0) return;
+  const newWord = seed[Math.floor(Math.random() * seed.length)];
+  chain.push('（パス）');
+  chain.push(newWord);
+  usedWords.add(newWord);
+  document.getElementById('current-word').textContent = newWord;
+  document.getElementById('word-input').value = '';
+  document.getElementById('error-msg').textContent = '';
+  renderChain();
+}
+
+function showError(msg) {
+  document.getElementById('error-msg').textContent = msg;
+  setTimeout(() => {
+    if (document.getElementById('error-msg').textContent === msg)
+      document.getElementById('error-msg').textContent = '';
+  }, 2000);
+}
+
+function flashInput(cls) {
+  const input = document.getElementById('word-input');
+  input.classList.add(cls);
+  setTimeout(() => input.classList.remove(cls), 500);
+}
+
+// ---- RENDER CHAIN ----
+function renderChain() {
+  const el = document.getElementById('chain-display');
+  if (chain.length === 0) {
+    el.innerHTML = '<span style="color:#3a3a60;font-size:0.85rem">チェーンがここに表示されます…</span>';
+    return;
+  }
+  // show last 12 words max
+  const visible = chain.slice(-12);
+  el.innerHTML = visible.map((w, i) =>
+    (i > 0 ? '<span class="chain-arrow">›</span>' : '') +
+    `<span class="chain-word">${w}</span>`
+  ).join('');
+  el.scrollLeft = el.scrollWidth;
+}
+
+// ---- END GAME ----
+function endGame() {
+  const icons = score >= 20 ? '🏆' : score >= 10 ? '🎉' : score >= 5 ? '😊' : '🌱';
+  const labels = score >= 20 ? '素晴らしい連想力！' : score >= 10 ? 'なかなかやるね！' : score >= 5 ? 'いい調子！' : 'もう一度チャレンジ！';
+
+  document.getElementById('result-icon').textContent = icons;
+  document.getElementById('result-score').textContent = score;
+  document.getElementById('result-label').textContent = `ワードつないだ！ — ${labels}`;
+
+  const fc = document.getElementById('final-chain');
+  fc.innerHTML = chain.map((w, i) =>
+    (i > 0 ? '<span style="color:#3a3a60">›</span>' : '') +
+    `<span class="final-word">${w}</span>`
+  ).join('');
+
+  showScreen('result-screen');
+}
+
+// ---- KEYBOARD ----
+document.getElementById('word-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') submitWord();
+});
+</script>
+</body>
+</html>
