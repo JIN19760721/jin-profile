@@ -100,6 +100,52 @@ python main.py --intraday --codes 7203 3778 --entry-mode manual --notify-line
   `signal_history` テーブルと、`excel/intraday_prices_YYYY-MM-DD_HHMM.xlsx`
   （5分足データ・損益計算・デイトレ判定・シグナル変化履歴の各シート）に出力されます
 
+### 判定条件の設定（settings.yaml）
+
+デイトレ判定（利確・損切りライン、急騰判定、出来高急増倍率、ENTRY_SCORE閾値・配点、
+通知抑制時間など）の判定条件は、コードを直接修正せず `settings.yaml` で変更できます。
+プロジェクトフォルダに `settings.yaml` がない場合や項目が不足している場合は、
+`config.py` 内のデフォルト値（既存の判定ロジックと同じ値）が使われます。
+
+| セクション.キー | 内容 | デフォルト |
+|---|---|---|
+| `trade_decision.stop_loss_pct` | 損切りライン（%） | -2 |
+| `trade_decision.take_profit_pct` | 利確ライン（%） | 5 |
+| `trade_decision.bar_change_strong_pct` | 急騰・急落判定（%） | 4 |
+| `trade_decision.abnormal_volume_ratio` | 出来高急増倍率 | 5 |
+| `trade_decision.confirm_bars` | STOP_LOSS/TAKE_PROFIT確定に必要な連続本数 | 2 |
+| `trade_decision.volume_decline_ratio` | 出来高減少フラグ判定比率 | 0.7 |
+| `trade_decision.volume_surge_continuation_ratio` | 出来高急増継続判定比率 | 1.5 |
+| `trade_decision.volume_fading_ratio` | 出来高失速判定比率 | 0.7 |
+| `trade_decision.vwap_near_pct` | VWAP接近判定 | 0.01 |
+| `trade_decision.atr_period` | ATR計算に使う本数 | 14 |
+| `trade_decision.atr_stop_multiplier` | ATR損切りラインの算出倍率 | 2 |
+| `trade_decision.atr_near_pct` | ATR損切りライン接近判定 | 0.01 |
+| `trade_decision.min_bars_for_atr` | ATR計算に必要な最低本数 | 2 |
+| `trade_decision.opening_range_start` / `opening_range_end` | 寄り付きレンジの開始/終了時刻 | "09:00" / "09:30" |
+| `trade_decision.entry_score_rank_threshold` | 注目銘柄ランキングの「上位」とみなす順位 | 10 |
+| `trade_decision.entry_score_threshold` | ENTRY_SCOREがこの値以上で`ENTRY` | 85 |
+| `trade_decision.watch_candidate_threshold` | ENTRY_SCOREがこの値以上(ENTRY未満)で`WATCH` | 70 |
+| `monitoring.time_limit` | この時刻を過ぎたら監視終了 | "15:20" |
+| `notification.duplicate_suppress_window_minutes` | 同一銘柄・同一シグナルのLINE通知抑制時間（分） | 30 |
+
+#### ENTRY_SCORE の配点（`trade_decision.entry_score_points`）
+
+| キー | 内容 | デフォルト |
+|---|---|---|
+| `vwap_above` | 現在価格がVWAPより上 | 20 |
+| `prev_high_breakout` | 前日高値ブレイク | 20 |
+| `opening_range_breakout` | 寄り付き30分高値ブレイク | 20 |
+| `volume_surge_continuation` | 出来高急増継続 | 20 |
+| `market_bull` | 地合いが「普通」または「強い」 | 5 |
+| `market_bear_penalty` | 地合いが「悪い」場合の減点 | -15 |
+| `rank_1_3` | 注目銘柄ランキング1〜3位の加点 | 15 |
+| `rank_4_5` | 注目銘柄ランキング4〜5位の加点 | 12 |
+| `rank_6_10` | 注目銘柄ランキング6〜10位の加点 | 10 |
+
+`ranking_top`（デフォルト15）も設定項目として存在しますが、現在のロジックでは
+`rank_1_3`/`rank_4_5`/`rank_6_10` の段階加点に置き換わっており未使用です。
+
 ### 監視終了・手動終了・再監視
 
 銘柄ごとに以下のいずれかに該当すると、その銘柄の監視は自動的に終了し、

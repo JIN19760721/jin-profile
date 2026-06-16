@@ -22,6 +22,7 @@ import sys
 
 import pandas as pd
 
+from config import DUPLICATE_SUPPRESS_WINDOW_MINUTES as _DUPLICATE_SUPPRESS_WINDOW_MINUTES
 from config import LOGS_DIR, last_business_day
 
 _DEFAULT_PERIOD = "30d"
@@ -29,10 +30,9 @@ _DEFAULT_PERIOD = "30d"
 # LINE通知対象シグナル（STAYは対象外。同一シグナル継続もここでは送らない）
 _NOTIFY_SIGNALS = {"ENTRY", "WATCH", "WATCH_STRONG", "TAKE_PROFIT", "STOP_LOSS"}
 
-# 30分以内の同一銘柄・同一シグナル重複通知の抑制対象から除外する
-# （緊急性が高いため、直近の重複に関わらず必ず通知する）
+# 重複通知抑制（_DUPLICATE_SUPPRESS_WINDOW_MINUTES、settings.yaml で変更可）の
+# 対象から除外する（緊急性が高いため、直近の重複に関わらず必ず通知する）
 _ALWAYS_NOTIFY_SIGNALS = {"STOP_LOSS", "TAKE_PROFIT", "WATCH_STRONG"}
-_DUPLICATE_SUPPRESS_WINDOW_MINUTES = 30
 
 
 def _is_recent_duplicate_notification(code: str, signal: str, signal_datetime_str: str) -> bool:

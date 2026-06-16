@@ -37,34 +37,36 @@ ATRベースの損切り（true_range の直近14本平均 atr_14 から算出�
 """
 
 import logging
-from datetime import datetime, time as dt_time
+from datetime import datetime
 
 import pandas as pd
 
-logger = logging.getLogger(__name__)
+from config import (
+    ABNORMAL_VOLUME_RATIO as _ABNORMAL_VOLUME_RATIO,
+    ATR_NEAR_PCT as _ATR_NEAR_PCT,
+    ATR_PERIOD as _ATR_PERIOD,
+    ATR_STOP_MULTIPLIER as _ATR_STOP_MULTIPLIER,
+    BAR_CHANGE_STRONG_PCT as _BAR_CHANGE_STRONG_PCT,
+    CONFIRM_BARS as _CONFIRM_BARS,
+    ENTRY_SCORE_POINTS as _ENTRY_SCORE_POINTS,
+    ENTRY_SCORE_THRESHOLD as _ENTRY_SCORE_THRESHOLD,
+    MIN_BARS_FOR_ATR as _MIN_BARS_FOR_ATR,
+    OPENING_RANGE_END as _OPENING_RANGE_END,
+    OPENING_RANGE_START as _OPENING_RANGE_START,
+    STOP_LOSS_PCT as _STOP_LOSS_PROFIT_PCT,
+    TAKE_PROFIT_PCT as _TAKE_PROFIT_PROFIT_PCT,
+    VOLUME_DECLINE_RATIO as _VOLUME_DECLINE_RATIO,
+    VOLUME_FADING_RATIO as _VOLUME_FADING_RATIO,
+    VOLUME_SURGE_CONTINUATION_RATIO as _VOLUME_SURGE_CONTINUATION_RATIO,
+    VWAP_NEAR_PCT as _VWAP_NEAR_PCT,
+    WATCH_CANDIDATE_THRESHOLD as _WATCH_CANDIDATE_THRESHOLD,
+)
 
-_STOP_LOSS_PROFIT_PCT = -2
-_TAKE_PROFIT_PROFIT_PCT = 5
-_VOLUME_DECLINE_RATIO = 0.7
-_VWAP_NEAR_PCT = 0.01
-_BAR_CHANGE_STRONG_PCT = 4
-_ABNORMAL_VOLUME_RATIO = 5
-_CONFIRM_BARS = 2
+logger = logging.getLogger(__name__)
 
 # 買いエントリー候補判定（ENTRY_SCORE）。既存の signal 列とは独立した判定で、
 # entry_score / entry_candidate として別フィールドに出力する。
-_ENTRY_SCORE_RANK_THRESHOLD = 10  # analysis_results.rank がこの値以下なら「ランキング上位」
-_ENTRY_SCORE_THRESHOLD = 85       # 以上: ENTRY
-_WATCH_CANDIDATE_THRESHOLD = 70   # 以上85未満: WATCH、未満: NO_ENTRY
-_VOLUME_SURGE_CONTINUATION_RATIO = 1.5
-_VOLUME_FADING_RATIO = 0.7
-_ATR_PERIOD = 14
-_ATR_STOP_MULTIPLIER = 2
-_ATR_NEAR_PCT = 0.01
-_MIN_BARS_FOR_ATR = 2
-
-_OPENING_RANGE_START = dt_time(9, 0)
-_OPENING_RANGE_END = dt_time(9, 30)
+# しきい値は settings.yaml の trade_decision セクションで変更できる。
 
 # signal_history で「変化イベント」として扱うシグナル（STAYへの遷移はイベントにしない）
 _EVENT_SIGNALS = {"ENTRY", "WATCH", "WATCH_STRONG", "TAKE_PROFIT", "STOP_LOSS"}
@@ -299,14 +301,29 @@ _AUX_CONFIRMED_PHRASES = {
 }
 
 
+def _rank_score(rank: int | None) -> tuple[int, str | None]:
+    """注目銘柄ランキング順位に応じた段階加点を返す（1〜3位/4〜5位/6〜10位/対象外）"""
+    if rank is None:
+        return 0, None
+    if rank <= 3:
+        return _ENTRY_SCORE_POINTS["rank_1_3"], "注目銘柄ランキング1〜3位"
+    if rank <= 5:
+        return _ENTRY_SCORE_POINTS["rank_4_5"], "注目銘柄ランキング4〜5位"
+    if rank <= 10:
+        return _ENTRY_SCORE_POINTS["rank_6_10"], "注目銘柄ランキング6〜10位"
+    return 0, None
+
+
 def compute_entry_score(ctx: dict) -> dict:
     """
     買いエントリー候補判定（ENTRY_SCORE, 0〜100）を計算する。
     既存の signal（STAY/WATCH/WATCH_STRONG/TAKE_PROFIT/STOP_LOSS/ENTRY）とは
     独立した判定で、entry_score / entry_candidate として別出力する。
 
-    配点: VWAPより上+20 / 前日高値ブレイク+20 / 寄り付き30分高値ブレイク+20 /
-          出来高急増継続+20 / 注目銘柄ランキング上位+15 / 地合いが悪くない+5（合計100）
+    配点（settings.yaml の trade_decision.entry_score_points で変更可）:
+    VWAPより上 / 前日高値ブレイク / 寄り付き30分高値ブレイク / 出来高急増継続が
+    各+20、注目銘柄ランキングは1〜3位+15・4〜5位+12・6〜10位+10、
+    地合いが「普通」「強い」なら+5、「悪い」なら減点（デフォルト-15）。
 
     85点以上: ENTRY / 70〜84点: WATCH / 70点未満: NO_ENTRY
     """
@@ -314,23 +331,32 @@ def compute_entry_score(ctx: dict) -> dict:
     factors: list[str] = []
 
     if ctx["current_price"] > ctx["vwap"]:
-        score += 20
+        score += _ENTRY_SCORE_POINTS["vwap_above"]
         factors.append("VWAPより上")
     if ctx["breakout_prev_high_flag"]:
-        score += 20
+        score += _ENTRY_SCORE_POINTS["prev_high_breakout"]
         factors.append("前日高値ブレイク")
     if ctx["opening_range_breakout"]:
-        score += 20
+        score += _ENTRY_SCORE_POINTS["opening_range_breakout"]
         factors.append("寄り付き30分高値ブレイク")
     if ctx["volume_surge_continuation"]:
-        score += 20
+        score += _ENTRY_SCORE_POINTS["volume_surge_continuation"]
         factors.append("出来高急増継続")
-    if ctx.get("rank_top"):
-        score += 15
-        factors.append("注目銘柄ランキング上位")
-    if ctx.get("market_sentiment_label") in ("普通", "強い"):
-        score += 5
+
+    rank_points, rank_factor = _rank_score(ctx.get("rank"))
+    if rank_points:
+        score += rank_points
+        factors.append(rank_factor)
+
+    market_sentiment_label = ctx.get("market_sentiment_label")
+    if market_sentiment_label in ("普通", "強い"):
+        score += _ENTRY_SCORE_POINTS["market_bull"]
         factors.append("地合いが悪くない")
+    elif market_sentiment_label == "悪い":
+        score += _ENTRY_SCORE_POINTS["market_bear_penalty"]
+        factors.append("地合いが悪い")
+
+    score = max(0, score)
 
     if score >= _ENTRY_SCORE_THRESHOLD:
         entry_candidate = "ENTRY"
@@ -540,7 +566,6 @@ def run_trade_decision(
         opening_range_breakdown = bool(opening_30min_low is not None and current_price < opening_30min_low)
 
         rank = get_latest_rank(code)
-        rank_top = bool(rank is not None and rank <= _ENTRY_SCORE_RANK_THRESHOLD)
 
         entry_score_info = compute_entry_score({
             "current_price":             current_price,
@@ -548,7 +573,7 @@ def run_trade_decision(
             "breakout_prev_high_flag":   breakout_prev_high_flag,
             "opening_range_breakout":    opening_range_breakout,
             "volume_surge_continuation": metrics["volume_surge_continuation"],
-            "rank_top":                  rank_top,
+            "rank":                      rank,
             "market_sentiment_label":    market_sentiment_label,
         })
 

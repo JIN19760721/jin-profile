@@ -16,11 +16,11 @@
 """
 
 import logging
-from datetime import datetime, time as dt_time
+from datetime import datetime
+
+from config import MONITORING_TIME_LIMIT as _TIME_LIMIT
 
 logger = logging.getLogger(__name__)
-
-_TIME_LIMIT = dt_time(15, 20)
 
 STOP_REASON_TAKE_PROFIT = "TAKE_PROFIT"
 STOP_REASON_STOP_LOSS = "STOP_LOSS"
