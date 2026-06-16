@@ -39,6 +39,7 @@ _C = {
     "intraday": "C00000", # 赤
     "profit":  "548235",  # 緑
     "signal":  "B45F06",  # 濃いオレンジ
+    "report":  "203864",  # 濃紺
     "text":    "FFFFFF",
 }
 
@@ -413,6 +414,23 @@ def _write_entry_candidate_history(wb, df: pd.DataFrame):
     logger.info("買い候補変化履歴シート: %d 行", len(df))
 
 
+def _write_daily_report(wb, df: pd.DataFrame):
+    ws = wb.create_sheet("日次監視レポート")
+    col_map = {
+        "code":              "銘柄コード",
+        "entry_count":       "ENTRY回数",
+        "watch_count":        "WATCH回数",
+        "take_profit_count": "TAKE_PROFIT回数",
+        "stop_loss_count":   "STOP_LOSS回数",
+        "max_profit_pct":    "最大含み益(%)",
+        "max_loss_pct":      "最大含み損(%)",
+        "last_signal":       "最終シグナル",
+        "last_reason":       "判定理由",
+    }
+    _write_df(ws, df, col_map, _C["report"])
+    logger.info("日次監視レポートシート: %d 行", len(df))
+
+
 # ── エントリーポイント ─────────────────────────────────────────
 
 
@@ -475,3 +493,21 @@ def export_intraday_excel(
     wb.save(out_path)
     logger.info("Excel 出力完了: %s", out_path)
     return out_path
+
+
+def export_daily_report_excel(df_report: pd.DataFrame, target_date: str) -> Path:
+    """
+    日次監視レポートを Excel に出力して保存パスを返す。
+    """
+    import openpyxl
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    _write_daily_report(wb, df_report)
+
+    out_path = EXCEL_DIR / f"daily_report_{target_date}.xlsx"
+    wb.save(out_path)
+    logger.info("Excel 出力完了: %s", out_path)
+    return out_path
+
+

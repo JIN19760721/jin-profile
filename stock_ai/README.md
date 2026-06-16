@@ -100,6 +100,45 @@ python main.py --intraday --codes 7203 3778 --entry-mode manual --notify-line
   `signal_history` テーブルと、`excel/intraday_prices_YYYY-MM-DD_HHMM.xlsx`
   （5分足データ・損益計算・デイトレ判定・シグナル変化履歴の各シート）に出力されます
 
+### 監視終了・手動終了・再監視
+
+銘柄ごとに以下のいずれかに該当すると、その銘柄の監視は自動的に終了し、
+`data/stocks.db` の `monitoring_status` テーブルに記録されます。
+終了済みの銘柄は、次回以降 `--codes` に指定しても自動的に対象から除外されます。
+
+| 終了理由 | 内容 |
+|----------|------|
+| `TAKE_PROFIT` | TAKE_PROFIT が確定した |
+| `STOP_LOSS`   | STOP_LOSS が確定した |
+| `TIME_LIMIT`  | 15:20 を過ぎた |
+| `VOLUME_DECLINE` | 出来高が大きく減少した（出来高失速） |
+| `MANUAL`      | `--stop-codes` で手動終了した |
+
+#### 手動で監視を終了する
+
+```bash
+python main.py --intraday --stop-codes 7203
+```
+
+#### 監視終了済みの銘柄を再開する
+
+```bash
+python main.py --intraday --resume-codes 7203
+```
+
+`--resume-codes` で指定した銘柄は `status` が `RESUMED` になり、
+`stop_reason` / `stopped_at` はクリアされ、`resumed_at` に再開日時が記録されます。
+監視終了されていない銘柄を指定してもエラーにはならず、ログに表示されるだけです。
+
+```bash
+# 7203 を再開し、そのまま 7203 3778 の監視を再開する例
+python main.py --intraday --resume-codes 7203
+python main.py --intraday --codes 7203 3778 --entry-mode manual
+```
+
+`--stop-codes` / `--resume-codes` は管理用の操作のみを行い、その回では
+5分足取得・判定は実行されません（指定した場合、他のオプションは無視されます）。
+
 ### LINE 通知の設定（LINE Messaging API）
 
 LINE Notify は提供終了のため、[LINE Developers](https://developers.line.biz/) で
@@ -234,6 +273,67 @@ code,entry_price
 いずれかのログが想定通り増えていない場合は、タスクスケジューラの
 「履歴」タブでタスクの実行結果（最終実行結果コード）を確認してください。
 
+### 5. 日次監視レポートの自動生成（取引終了後）
+
+5分足の監視（`run_intraday.bat`）とは別に、取引終了後にその日の監視結果を
+集計した「日次監視レポート」を1日1回自動生成できます。`run_intraday.bat` の
+処理内容は変更していません。
+
+`run_daily_report.bat` がプロジェクトフォルダにあり、以下を行います。
+
+- プロジェクトフォルダへ `cd`
+- `.venv` があれば自動で有効化
+- `python main.py --daily-report` を実行（対象日は実行日。当日の `trade_signals`
+  から銘柄ごとに集計）
+- 実行開始時刻の見出し付きで、標準出力・エラーを `logs\daily_report_bat_YYYYMMDD.log`
+  に追記保存
+- Excel は `excel\daily_report_YYYY-MM-DD.xlsx`（「日次監視レポート」シート）に出力
+
+#### タスクスケジューラへの登録（15:35 に1日1回）
+
+1. 「タスク スケジューラ」を起動 → 「タスクの作成」
+2. **「一般」タブ**
+   - 名前: `stock_ai_daily_report`
+   - 「ユーザーがログオンしているかどうかにかかわらず実行する」を選択
+3. **「トリガー」タブ** → 「新規」
+   - 開始: タスクを開始する日 + `15:35`
+   - 「毎日」を選択（繰り返し間隔は設定しない。1日1回のみ）
+4. **「操作」タブ** → 「新規」
+   - 操作: 「プログラムの開始」
+   - プログラム/スクリプト: `run_daily_report.bat` のフルパス
+     （例: `C:\claude\stock_ai\run_daily_report.bat`）
+   - 開始場所（オプション）: プロジェクトフォルダのフルパス
+     （例: `C:\claude\stock_ai`）
+5. 「OK」で保存
+
+> コマンドラインから登録する場合:
+>
+> ```bat
+> schtasks /create /tn "stock_ai_daily_report" /tr "C:\claude\stock_ai\run_daily_report.bat" ^
+>   /sc daily /st 15:35 /ru "%USERNAME%"
+> ```
+
+#### 手動実行
+
+```bash
+# 本日分のレポートを作成
+python main.py --daily-report
+
+# バッチ経由（タスクスケジューラと同じ実行内容）
+run_daily_report.bat
+
+# 対象日を指定する場合
+python main.py --daily-report --date 2026-06-17
+```
+
+#### ログの確認方法
+
+- `logs\daily_report_bat_YYYYMMDD.log`: `run_daily_report.bat` の実行ログ
+  （`==== 日付 時刻 ====` の見出し付きで標準出力・エラーを追記）
+- `logs\run_YYYY-MM-DD.log`: `main.py` 自身のアプリケーションログ
+- 対象日にデータがない場合はエラーにはならず、警告ログのみで終了します
+  （Excelファイルは作成されません）
+
 ---
 
 ## 処理フロー
@@ -342,6 +442,7 @@ stock_ai/
 ├── requirements.txt
 ├── README.md
 ├── run_intraday.bat  # タスクスケジューラ用の実行バッチ（5分足デイトレ判定）
+├── run_daily_report.bat # タスクスケジューラ用の実行バッチ（日次監視レポート、1日1回）
 ├── entry_prices.csv  # --entry-mode manual 用の買値CSV（要作成）
 ├── config.py         # 設定・定数
 ├── main.py           # メインエントリーポイント
@@ -355,6 +456,9 @@ stock_ai/
 ├── entry_price.py    # エントリー価格決定（first_close / manual）
 ├── trade_decision.py # デイトレ判定（VWAP・前日高安・寄り付きレンジ・出来高・ATR・スコア）
 ├── line_notify.py    # LINE Messaging API 送信
+├── notifier.py       # 買い候補（entry_candidate）の変化検知・通知ロジック
+├── monitoring.py     # 銘柄ごとの監視終了条件の判定
+├── daily_report.py   # 日次監視レポート集計
 ├── data/             # SQLite DB
 ├── excel/            # Excel 出力先
 └── logs/             # 実行ログ

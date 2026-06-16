@@ -106,6 +106,48 @@ def run_intraday_mode(args, logger):
     5分足モニタリングモード: 指定銘柄の5分足を取得し、エントリー価格に対する
     損益率を計算して DB/Excel に保存する。注目銘柄ランキング機能とは独立したフロー。
     """
+    from db import init_db
+    init_db()
+
+    if args.stop_codes:
+        from datetime import datetime as _datetime
+
+        from code_parser import parse_codes
+        from db import stop_monitoring
+        from monitoring import STOP_REASON_MANUAL
+
+        stop_codes = parse_codes(args.stop_codes)
+        if not stop_codes:
+            logger.error("--stop-codes には有効な4桁銘柄コードを指定してください。")
+            sys.exit(1)
+
+        now_str = _datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for code in stop_codes:
+            stop_monitoring(code, STOP_REASON_MANUAL, now_str)
+        logger.info("手動で監視終了しました: %s", stop_codes)
+        return
+
+    if args.resume_codes:
+        from datetime import datetime as _datetime
+
+        from code_parser import parse_codes
+        from db import get_stopped_codes, resume_monitoring
+
+        resume_codes = parse_codes(args.resume_codes)
+        if not resume_codes:
+            logger.error("--resume-codes には有効な4桁銘柄コードを指定してください。")
+            sys.exit(1)
+
+        stopped_codes = get_stopped_codes()
+        now_str = _datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for code in resume_codes:
+            if code not in stopped_codes:
+                logger.info("銘柄 %s: 監視終了されていないため再開対象外です。", code)
+                continue
+            resume_monitoring(code, now_str)
+        logger.info("監視再開を処理しました: %s", resume_codes)
+        return
+
     from code_parser import parse_codes
 
     codes = parse_codes(args.codes or [])
@@ -113,12 +155,19 @@ def run_intraday_mode(args, logger):
         logger.error("--intraday には --codes で有効な4桁銘柄コードを指定してください。")
         sys.exit(1)
 
+    from db import get_stopped_codes
+    stopped_codes = get_stopped_codes()
+    excluded_codes = [c for c in codes if c in stopped_codes]
+    codes = [c for c in codes if c not in stopped_codes]
+    if excluded_codes:
+        logger.info("監視終了済みのため対象から除外: %s", excluded_codes)
+    if not codes:
+        logger.warning("対象銘柄がすべて監視終了済みのため処理を終了します。")
+        return
+
     logger.info("=" * 60)
     logger.info("5分足モニタリング 開始 (codes=%s, entry-mode=%s)", codes, args.entry_mode)
     logger.info("=" * 60)
-
-    from db import init_db
-    init_db()
 
     from intraday_monitor import run_intraday_fetch, run_intraday_positions
     df_prices = run_intraday_fetch(codes)
@@ -156,6 +205,19 @@ def run_intraday_mode(args, logger):
 
     from trade_decision import run_trade_decision
     df_signals, df_history = run_trade_decision(df_prices, df_positions, previous_ohlc, market_sentiment)
+
+    # 監視終了条件（TAKE_PROFIT/STOP_LOSS確定・15:20超過・出来高大幅減少）の判定。
+    # 終了した銘柄は monitoring_status に記録され、次回以降の --intraday 対象から除外される。
+    from db import stop_monitoring
+    from monitoring import evaluate_stop_condition
+    for _, row in df_signals.iterrows():
+        stop_reason = evaluate_stop_condition(row["signal"], row["signal_datetime"], bool(row.get("volume_fading")))
+        if stop_reason:
+            stop_monitoring(row["code"], stop_reason, row["signal_datetime"])
+            logger.info(
+                "銘柄 %s: 監視終了条件に合致（%s）。次回以降は監視対象から除外します。",
+                row["code"], stop_reason,
+            )
 
     # LINE通知の判定は signal_history.changed_flag を正とする
     # （trade_signals.signal_changed は後方互換のため残しているが非推奨）。
@@ -238,6 +300,37 @@ def run_intraday_mode(args, logger):
     logger.info("=" * 60)
 
 
+def run_daily_report_mode(args, logger):
+    """
+    取引終了後の日次監視レポートを作成する。当日（または --date 指定日）の
+    trade_signals を銘柄ごとに集計し、Excel に出力する。
+    """
+    from datetime import date as _date
+    target_date = args.date or str(_date.today())
+
+    logger.info("=" * 60)
+    logger.info("日次監視レポート作成 (対象日=%s)", target_date)
+    logger.info("=" * 60)
+
+    from db import init_db
+    init_db()
+
+    from daily_report import build_daily_report
+    df_report = build_daily_report(target_date)
+
+    if df_report.empty:
+        logger.warning("対象日 %s のデータがないため日次監視レポートを作成できませんでした。", target_date)
+        return
+
+    from export_excel import export_daily_report_excel
+    out_path = export_daily_report_excel(df_report, target_date)
+    logger.info("日次監視レポート出力先: %s", out_path)
+
+    logger.info("=" * 60)
+    logger.info("処理完了")
+    logger.info("=" * 60)
+
+
 def main():
     parser = argparse.ArgumentParser(description="日本株注目銘柄 自動抽出ツール")
     parser.add_argument("--date",   help="分析対象日 (YYYY-MM-DD, 省略時は取得データの最新日)")
@@ -248,12 +341,19 @@ def main():
     parser.add_argument("--entry-mode", choices=["first_close", "manual"], default="first_close",
                          help="エントリー価格の決定方法 (デフォルト: first_close)")
     parser.add_argument("--notify-line", action="store_true", help="シグナル変化時にLINE Notifyで通知する（指定しない場合はログのみ）")
+    parser.add_argument("--stop-codes", nargs="+", help="指定銘柄の監視を手動で終了する（4桁数字。--intraday と併用、他のオプションは無視される）")
+    parser.add_argument("--resume-codes", nargs="+", help="監視終了済みの指定銘柄を再開する（4桁数字。--intraday と併用、他のオプションは無視される）")
+    parser.add_argument("--daily-report", action="store_true", help="取引終了後の日次監視レポートをExcel出力する（--dateで対象日を指定可、省略時は本日）")
     args = parser.parse_args()
 
     # ログ用の日付（分析前なので暫定で today を使用）
     from datetime import date as _date
     setup_logging(str(_date.today()))
     logger = logging.getLogger("main")
+
+    if args.daily_report:
+        run_daily_report_mode(args, logger)
+        return
 
     if args.intraday:
         run_intraday_mode(args, logger)

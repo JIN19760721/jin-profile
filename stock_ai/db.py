@@ -169,6 +169,16 @@ CREATE TABLE IF NOT EXISTS entry_candidate_history (
     PRIMARY KEY (code, signal_datetime)
 );
 
+CREATE TABLE IF NOT EXISTS monitoring_status (
+    code        TEXT PRIMARY KEY,
+    status      TEXT NOT NULL DEFAULT 'ACTIVE',
+    stop_reason TEXT,
+    stopped_at  TEXT,
+    resumed_at  TEXT,
+    created_at  TEXT DEFAULT (datetime('now', 'localtime')),
+    updated_at  TEXT DEFAULT (datetime('now', 'localtime'))
+);
+
 CREATE TABLE IF NOT EXISTS analysis_results (
     code              TEXT NOT NULL,
     date              TEXT NOT NULL,
@@ -244,6 +254,11 @@ _TRADE_SIGNALS_NEW_COLS = [
     ("entry_factors",           "TEXT"),
 ]
 
+# monitoring_status に追加するカラム
+_MONITORING_STATUS_NEW_COLS = [
+    ("resumed_at", "TEXT"),
+]
+
 
 @contextmanager
 def get_conn():
@@ -277,11 +292,21 @@ def _migrate_trade_signals(conn) -> None:
             pass  # already exists
 
 
+def _migrate_monitoring_status(conn) -> None:
+    """monitoring_status テーブルに不足カラムを安全に追加する"""
+    for col, typ in _MONITORING_STATUS_NEW_COLS:
+        try:
+            conn.execute(f"ALTER TABLE monitoring_status ADD COLUMN {col} {typ}")
+        except Exception:
+            pass  # already exists
+
+
 def init_db():
     with get_conn() as conn:
         conn.executescript(CREATE_TABLES_SQL)
         _migrate_analysis_results(conn)
         _migrate_trade_signals(conn)
+        _migrate_monitoring_status(conn)
     logger.info("DB初期化完了: %s", DB_PATH)
 
 
@@ -499,6 +524,54 @@ def get_company_name(code: str) -> str | None:
         )
         row = cursor.fetchone()
         return row["company_name"] if row else None
+
+
+def get_stopped_codes() -> set[str]:
+    """監視終了済み（STOPPED）の銘柄コード集合を返す。次回以降の --intraday 対象から除外するために使う"""
+    with get_conn() as conn:
+        cursor = conn.execute("SELECT code FROM monitoring_status WHERE status = 'STOPPED'")
+        return {row["code"] for row in cursor.fetchall()}
+
+
+def stop_monitoring(code: str, reason: str, stopped_at: str):
+    """指定銘柄の監視を終了状態にする（以後 get_stopped_codes() に含まれるようになる）"""
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO monitoring_status (code, status, stop_reason, stopped_at, updated_at)
+            VALUES (?, 'STOPPED', ?, ?, datetime('now', 'localtime'))
+            ON CONFLICT(code) DO UPDATE SET
+                status = 'STOPPED',
+                stop_reason = excluded.stop_reason,
+                stopped_at = excluded.stopped_at,
+                updated_at = datetime('now', 'localtime')
+            """,
+            (code, reason, stopped_at),
+        )
+    logger.info("銘柄 %s: 監視終了 (理由: %s)", code, reason)
+
+
+def resume_monitoring(code: str, resumed_at: str):
+    """
+    指定銘柄の監視を再開する。status を RESUMED に変更し、
+    stop_reason / stopped_at は NULL にクリア、resumed_at を記録する。
+    以後 get_stopped_codes() には含まれなくなる（再び監視対象になる）。
+    """
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO monitoring_status (code, status, stop_reason, stopped_at, resumed_at, updated_at)
+            VALUES (?, 'RESUMED', NULL, NULL, ?, datetime('now', 'localtime'))
+            ON CONFLICT(code) DO UPDATE SET
+                status = 'RESUMED',
+                stop_reason = NULL,
+                stopped_at = NULL,
+                resumed_at = excluded.resumed_at,
+                updated_at = datetime('now', 'localtime')
+            """,
+            (code, resumed_at),
+        )
+    logger.info("銘柄 %s: 監視再開", code)
 
 
 def get_latest_trade_signal(code: str) -> dict | None:
