@@ -511,3 +511,51 @@ def export_daily_report_excel(df_report: pd.DataFrame, target_date: str) -> Path
     return out_path
 
 
+def _write_backtest_summary(wb, summary: dict):
+    ws = wb.create_sheet("バックテスト結果")
+    rows = [
+        ("総トレード数",         summary["total_trades"]),
+        ("勝率(%)",              summary["win_rate_pct"]),
+        ("平均利益率(%)",        summary["avg_profit_pct"]),
+        ("平均損失率(%)",        summary["avg_loss_pct"]),
+        ("最大ドローダウン(%)",  summary["max_drawdown_pct"]),
+        ("TAKE_PROFIT到達率(%)", summary["take_profit_rate_pct"]),
+        ("STOP_LOSS到達率(%)",   summary["stop_loss_rate_pct"]),
+    ]
+    ws.append(["項目", "値"])
+    _style_header(ws, _C["report"], 2)
+    for label, val in rows:
+        ws.append([label, val])
+    _auto_width(ws)
+    logger.info("バックテスト結果シート出力完了")
+
+
+def _write_backtest_trades(wb, df: pd.DataFrame):
+    ws = wb.create_sheet("バックテスト詳細")
+    col_map = {
+        "code":              "銘柄コード",
+        "date":              "対象日",
+        "exit_reason":       "決済理由",
+        "profit_pct":        "損益率(%)",
+        "max_drawdown_pct":  "最大ドローダウン(%)",
+    }
+    _write_df(ws, df, col_map, _C["report"])
+    logger.info("バックテスト詳細シート: %d 行", len(df))
+
+
+def export_backtest_excel(summary: dict, df_trades: pd.DataFrame, run_dt: str) -> Path:
+    """
+    バックテスト結果（サマリー・トレード詳細）を Excel に出力して保存パスを返す。
+    """
+    import openpyxl
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    _write_backtest_summary(wb, summary)
+    _write_backtest_trades(wb, df_trades)
+
+    out_path = EXCEL_DIR / f"backtest_{run_dt}.xlsx"
+    wb.save(out_path)
+    logger.info("Excel 出力完了: %s", out_path)
+    return out_path
+

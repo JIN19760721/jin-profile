@@ -331,6 +331,54 @@ def run_daily_report_mode(args, logger):
     logger.info("=" * 60)
 
 
+def run_backtest_mode(args, logger):
+    """
+    過去の intraday_prices データを使って現行の判定ロジックをバックテストする。
+    --codes を指定すればその銘柄のみ、未指定なら保存済みの全銘柄が対象。
+    """
+    logger.info("=" * 60)
+    logger.info("バックテスト開始 (codes=%s)", args.codes or "全銘柄")
+    logger.info("=" * 60)
+
+    from db import init_db
+    init_db()
+
+    codes = None
+    if args.codes:
+        from code_parser import parse_codes
+        codes = parse_codes(args.codes)
+        if not codes:
+            logger.error("--backtest で --codes を指定する場合は有効な4桁銘柄コードが必要です。")
+            sys.exit(1)
+
+    from backtest import run_backtest
+    result = run_backtest(codes)
+    summary = result["summary"]
+    df_trades = result["trades"]
+
+    if summary is None:
+        logger.warning("バックテスト対象データがありませんでした。")
+        return
+
+    logger.info(
+        "総トレード数=%d 勝率=%s%% 平均利益率=%s%% 平均損失率=%s%% "
+        "最大ドローダウン=%s%% TAKE_PROFIT到達率=%s%% STOP_LOSS到達率=%s%%",
+        summary["total_trades"], summary["win_rate_pct"], summary["avg_profit_pct"],
+        summary["avg_loss_pct"], summary["max_drawdown_pct"],
+        summary["take_profit_rate_pct"], summary["stop_loss_rate_pct"],
+    )
+
+    from datetime import datetime
+    from export_excel import export_backtest_excel
+    run_dt = datetime.now().strftime("%Y-%m-%d_%H%M")
+    out_path = export_backtest_excel(summary, df_trades, run_dt)
+    logger.info("バックテスト結果出力先: %s", out_path)
+
+    logger.info("=" * 60)
+    logger.info("処理完了")
+    logger.info("=" * 60)
+
+
 def main():
     parser = argparse.ArgumentParser(description="日本株注目銘柄 自動抽出ツール")
     parser.add_argument("--date",   help="分析対象日 (YYYY-MM-DD, 省略時は取得データの最新日)")
@@ -344,12 +392,17 @@ def main():
     parser.add_argument("--stop-codes", nargs="+", help="指定銘柄の監視を手動で終了する（4桁数字。--intraday と併用、他のオプションは無視される）")
     parser.add_argument("--resume-codes", nargs="+", help="監視終了済みの指定銘柄を再開する（4桁数字。--intraday と併用、他のオプションは無視される）")
     parser.add_argument("--daily-report", action="store_true", help="取引終了後の日次監視レポートをExcel出力する（--dateで対象日を指定可、省略時は本日）")
+    parser.add_argument("--backtest", action="store_true", help="過去のintraday_pricesデータで判定ロジックをバックテストする（--codesで対象銘柄を指定可、省略時は全銘柄）")
     args = parser.parse_args()
 
     # ログ用の日付（分析前なので暫定で today を使用）
     from datetime import date as _date
     setup_logging(str(_date.today()))
     logger = logging.getLogger("main")
+
+    if args.backtest:
+        run_backtest_mode(args, logger)
+        return
 
     if args.daily_report:
         run_daily_report_mode(args, logger)
