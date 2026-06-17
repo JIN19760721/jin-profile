@@ -76,6 +76,53 @@ python main.py --skip-fetch
 
 ---
 
+## ランキング通知（LINE）
+
+注目銘柄ランキングの上位 N 件を LINE に送信します。
+
+```bash
+# デフォルト（上位10件）を通知
+python main.py --notify-ranking
+
+# 件数を指定して通知
+python main.py --notify-ranking --ranking-top 10
+```
+
+通常分析後に続けて通知したい場合:
+
+```bash
+python main.py
+python main.py --notify-ranking
+```
+
+**注意:**
+- 事前に `python main.py` で注目銘柄ランキングを生成しておく（DB にデータがない場合は送信されません）
+- LINE 通知には `LINE_CHANNEL_ACCESS_TOKEN` と `LINE_USER_ID` が必要です（未設定時はログのみ）
+- `--ranking-top` は最大 20 件まで指定できます
+
+通知文の例:
+
+```
+【本日の注目銘柄ランキング】
+2026-06-17
+
+1位 3778 さくらインターネット
+株価：4,200円
+前日比：+8.5%
+出来高急増：3.2倍
+スコア：92
+理由：出来高急増、前日高値突破
+
+2位 7203 トヨタ自動車
+株価：2,850円
+前日比：+3.4%
+出来高急増：2.1倍
+スコア：81
+理由：VWAP上、出来高増加
+```
+
+---
+
 ## 5分足デイトレ判定（イントラデイ監視）
 
 指定銘柄（最大5件）の5分足を取得し、エントリー価格に対する損益率や VWAP・前日高安・
@@ -502,6 +549,7 @@ stock_ai/
 ├── entry_price.py    # エントリー価格決定（first_close / manual）
 ├── trade_decision.py # デイトレ判定（VWAP・前日高安・寄り付きレンジ・出来高・ATR・スコア）
 ├── line_notify.py    # LINE Messaging API 送信
+├── ranking_notifier.py # 注目銘柄ランキングの LINE 通知
 ├── notifier.py       # 買い候補（entry_candidate）の変化検知・通知ロジック
 ├── monitoring.py     # 銘柄ごとの監視終了条件の判定
 ├── daily_report.py   # 日次監視レポート集計
