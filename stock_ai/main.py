@@ -379,34 +379,6 @@ def run_backtest_mode(args, logger):
     logger.info("=" * 60)
 
 
-def run_notify_ranking_mode(args, logger):
-    """
-    注目銘柄ランキングの上位 N 件を LINE に送信する。
-    事前に通常実行（python main.py）でランキングを生成しておく必要がある。
-    """
-    from db import init_db
-    init_db()
-
-    top_n = args.ranking_top
-    logger.info("=" * 60)
-    logger.info("注目銘柄ランキング通知 開始 (top_n=%d)", top_n)
-    logger.info("=" * 60)
-
-    try:
-        from ranking_notifier import notify_ranking
-        result = notify_ranking(top_n)
-        if result:
-            logger.info("ランキング通知完了")
-        else:
-            logger.warning("ランキング通知に失敗しました（またはデータなし）")
-    except Exception as e:
-        logger.error("ランキング通知エラー: %s", e, exc_info=True)
-
-    logger.info("=" * 60)
-    logger.info("処理完了")
-    logger.info("=" * 60)
-
-
 def main():
     parser = argparse.ArgumentParser(description="日本株注目銘柄 自動抽出ツール")
     parser.add_argument("--date",   help="分析対象日 (YYYY-MM-DD, 省略時は取得データの最新日)")
@@ -421,7 +393,7 @@ def main():
     parser.add_argument("--resume-codes", nargs="+", help="監視終了済みの指定銘柄を再開する（4桁数字。--intraday と併用、他のオプションは無視される）")
     parser.add_argument("--daily-report", action="store_true", help="取引終了後の日次監視レポートをExcel出力する（--dateで対象日を指定可、省略時は本日）")
     parser.add_argument("--backtest", action="store_true", help="過去のintraday_pricesデータで判定ロジックをバックテストする（--codesで対象銘柄を指定可、省略時は全銘柄）")
-    parser.add_argument("--notify-ranking", action="store_true", help="注目銘柄ランキング上位をLINE通知する（事前にpython main.pyでランキングを生成しておく）")
+    parser.add_argument("--notify-ranking", action="store_true", help="分析完了後に注目銘柄ランキング上位をLINE通知する")
     parser.add_argument("--ranking-top", type=int, default=10, metavar="N",
                         help="--notify-ranking で通知するランキングの件数（デフォルト: 10、最大: 20）")
     args = parser.parse_args()
@@ -437,10 +409,6 @@ def main():
 
     if args.daily_report:
         run_daily_report_mode(args, logger)
-        return
-
-    if args.notify_ranking:
-        run_notify_ranking_mode(args, logger)
         return
 
     if args.intraday:
@@ -531,6 +499,19 @@ def main():
         logger.info("出力先: %s", out_path)
     except Exception as e:
         logger.error("Excel 出力失敗: %s", e, exc_info=True)
+
+    # ── Step 7: ランキング LINE 通知（--notify-ranking 時のみ）─
+    if args.notify_ranking:
+        logger.info("[Step 7] ランキング LINE 通知 (top_n=%d)", args.ranking_top)
+        try:
+            from ranking_notifier import notify_ranking
+            result = notify_ranking(args.ranking_top)
+            if result:
+                logger.info("ランキング通知完了")
+            else:
+                logger.warning("ランキング通知に失敗しました（またはデータなし）")
+        except Exception as e:
+            logger.error("ランキング通知エラー: %s", e, exc_info=True)
 
     logger.info("=" * 60)
     logger.info("処理完了")

@@ -78,27 +78,24 @@ python main.py --skip-fetch
 
 ## ランキング通知（LINE）
 
-注目銘柄ランキングの上位 N 件を LINE に送信します。
+`--notify-ranking` を付けると、分析（データ取得 → スコアリング → Excel 出力）完了後に
+注目銘柄ランキングの上位 N 件を LINE に自動送信します。
 
 ```bash
-# デフォルト（上位10件）を通知
+# 分析してデフォルト（上位10件）を通知
 python main.py --notify-ranking
 
 # 件数を指定して通知
-python main.py --notify-ranking --ranking-top 10
-```
+python main.py --notify-ranking --ranking-top 5
 
-通常分析後に続けて通知したい場合:
-
-```bash
-python main.py
-python main.py --notify-ranking
+# データ取得をスキップして分析 + 通知
+python main.py --skip-fetch --notify-ranking
 ```
 
 **注意:**
-- 事前に `python main.py` で注目銘柄ランキングを生成しておく（DB にデータがない場合は送信されません）
 - LINE 通知には `LINE_CHANNEL_ACCESS_TOKEN` と `LINE_USER_ID` が必要です（未設定時はログのみ）
 - `--ranking-top` は最大 20 件まで指定できます
+- 通知失敗時もメイン処理（分析・Excel 出力）には影響しません
 
 通知文の例:
 
