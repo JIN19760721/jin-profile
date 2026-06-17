@@ -152,8 +152,18 @@ def run_intraday_mode(args, logger):
 
     codes = parse_codes(args.codes or [])
     if not codes:
-        logger.error("--intraday には --codes で有効な4桁銘柄コードを指定してください。")
-        sys.exit(1)
+        # --codes 未指定時は watchlist のアクティブ銘柄にフォールバック
+        from watchlist import get_active_watchlist
+        watchlist = get_active_watchlist()
+        if watchlist:
+            codes = [w["code"] for w in watchlist]
+            logger.info("watchlist から監視銘柄を取得: %s", codes)
+        else:
+            logger.error(
+                "--codes が未指定で watchlist にも銘柄がありません。"
+                "--codes で銘柄を指定するか、LINE で銘柄コードを送信して watchlist に登録してください。"
+            )
+            sys.exit(1)
 
     from db import get_stopped_codes
     stopped_codes = get_stopped_codes()

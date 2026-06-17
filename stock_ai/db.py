@@ -195,6 +195,16 @@ CREATE TABLE IF NOT EXISTS analysis_results (
     created_at        TEXT DEFAULT (datetime('now', 'localtime')),
     PRIMARY KEY (code, date)
 );
+
+CREATE TABLE IF NOT EXISTS watchlist (
+    code          TEXT PRIMARY KEY,
+    company_name  TEXT,
+    selected_date TEXT,
+    source        TEXT,
+    is_active     INTEGER DEFAULT 1,
+    created_at    TEXT DEFAULT (datetime('now', 'localtime')),
+    updated_at    TEXT DEFAULT (datetime('now', 'localtime'))
+);
 """
 
 # analysis_results に追加するカラム
@@ -661,3 +671,45 @@ def get_latest_quote_date() -> str | None:
         cursor = conn.execute("SELECT MAX(date) FROM daily_quotes")
         row = cursor.fetchone()
         return row[0] if row and row[0] else None
+
+
+# ── watchlist ─────────────────────────────────────────────────────────────────
+
+
+def deactivate_watchlist() -> None:
+    """全エントリーを is_active=0 にする（新規登録前の一括無効化用）"""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE watchlist SET is_active = 0, updated_at = datetime('now', 'localtime')"
+        )
+    logger.info("watchlist: 全エントリーを無効化しました")
+
+
+def upsert_watchlist_entries(rows: list[dict]) -> None:
+    """指定銘柄を watchlist に登録（既存コードは is_active=1 に更新）"""
+    sql = """
+        INSERT INTO watchlist (code, company_name, selected_date, source, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 1, datetime('now', 'localtime'), datetime('now', 'localtime'))
+        ON CONFLICT(code) DO UPDATE SET
+            company_name  = excluded.company_name,
+            selected_date = excluded.selected_date,
+            source        = excluded.source,
+            is_active     = 1,
+            updated_at    = datetime('now', 'localtime')
+    """
+    data = [
+        (r["code"], r.get("company_name"), r.get("selected_date"), r.get("source"))
+        for r in rows
+    ]
+    with get_conn() as conn:
+        conn.executemany(sql, data)
+    logger.info("watchlist 登録: %d 件", len(data))
+
+
+def get_active_watchlist() -> list[dict]:
+    """is_active=1 の銘柄一覧を返す"""
+    with get_conn() as conn:
+        cursor = conn.execute(
+            "SELECT code, company_name, selected_date, source FROM watchlist WHERE is_active = 1 ORDER BY rowid"
+        )
+        return [dict(row) for row in cursor.fetchall()]

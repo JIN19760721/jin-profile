@@ -21,8 +21,9 @@ JQUANTS_API_KEY = os.getenv("JQUANTS_API_KEY", "") or os.getenv("JQUANTS_REFRESH
 
 JQUANTS_BASE_URL = "https://api.jquants.com/v2"
 
-# LINE Messaging API（デイトレ判定のシグナル変化通知用）
+# LINE Messaging API（デイトレ判定のシグナル変化通知・Webhook用）
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
+LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET", "")
 LINE_USER_ID = os.getenv("LINE_USER_ID", "")
 
 

@@ -120,6 +120,96 @@ python main.py --skip-fetch --notify-ranking
 
 ---
 
+## LINE で銘柄を登録して監視する（Webhook）
+
+ランキング通知を受け取った後、LINE に銘柄コードを返信するだけで
+5分足監視の対象銘柄（watchlist）を登録できます。**自動売買は行いません。**
+
+### 対応メッセージ形式
+
+```
+監視 7203 3778
+watch 7203 3778
+7203 3778
+7203,3778
+```
+
+- 4桁数字のみ抽出（重複除外）
+- 最大5銘柄。超過時はエラー返信
+- 本日の注目銘柄ランキングに含まれる銘柄のみ登録可能（ランキング外は登録せず返信）
+- 登録すると既存の watchlist は全て置き換わる
+
+### LINE 返信例
+
+**正常時:**
+```
+監視対象を登録しました。
+7203 トヨタ自動車
+3778 さくらインターネット
+
+次回の5分足監視から対象になります。
+```
+
+**件数超過:**
+```
+監視対象は最大5銘柄までです。
+```
+
+**ランキング外:**
+```
+以下は本日の注目銘柄ランキング外のため登録しませんでした。
+9999
+```
+
+### Webhook サーバーの設定
+
+#### 1. .env に追加
+
+```env
+LINE_CHANNEL_SECRET=your_channel_secret
+LINE_CHANNEL_ACCESS_TOKEN=your_channel_access_token
+LINE_USER_ID=your_line_user_id
+```
+
+`LINE_CHANNEL_SECRET` は LINE Developers のチャネル基本設定で確認できます。
+
+#### 2. Flask サーバーを起動
+
+```bash
+python line_webhook.py
+```
+
+#### 3. ngrok で外部公開（ローカル開発時）
+
+```bash
+ngrok http 5000
+```
+
+ngrok が発行した URL（例: `https://xxxxx.ngrok-free.app`）を
+LINE Developers の「Messaging API 設定」→「Webhook URL」に設定します。
+
+```
+https://xxxxx.ngrok-free.app/callback
+```
+
+「Webhook の利用」を ON にして「検証」ボタンで疎通確認してください。
+
+#### 4. watchlist 確認後に監視実行
+
+```bash
+# watchlist から自動取得して監視（--codes 不要）
+python main.py --intraday --entry-mode manual
+
+# 従来通り --codes で直接指定も可能
+python main.py --intraday --codes 7203 3778 --entry-mode manual
+```
+
+> **セキュリティ注意:** 本番利用時は `.env` に `LINE_CHANNEL_SECRET` を設定し、
+> Webhook の署名検証を有効にしてください。未設定時は検証をスキップするため、
+> 第三者からのリクエストを受け入れてしまいます。
+
+---
+
 ## 5分足デイトレ判定（イントラデイ監視）
 
 指定銘柄（最大5件）の5分足を取得し、エントリー価格に対する損益率や VWAP・前日高安・
@@ -132,6 +222,9 @@ python main.py --intraday --codes 7203 3778 --entry-mode first_close
 
 # entry_prices.csv（code,entry_price）から買値を読み込む場合
 python main.py --intraday --codes 7203 3778 --entry-mode manual
+
+# watchlist に登録済みの銘柄を自動取得して監視する場合（--codes 省略可）
+python main.py --intraday --entry-mode manual
 
 # シグナル変化時にLINE Notifyへ通知する場合（--notify-line を付与）
 python main.py --intraday --codes 7203 3778 --entry-mode manual --notify-line
@@ -545,8 +638,10 @@ stock_ai/
 ├── intraday_monitor.py # 5分足取得・損益計算・前日OHLC取得
 ├── entry_price.py    # エントリー価格決定（first_close / manual）
 ├── trade_decision.py # デイトレ判定（VWAP・前日高安・寄り付きレンジ・出来高・ATR・スコア）
-├── line_notify.py    # LINE Messaging API 送信
+├── line_notify.py    # LINE Messaging API 送信（push）
+├── line_webhook.py   # LINE Webhook サーバー（Flask）- 銘柄コード受信 → watchlist 登録
 ├── ranking_notifier.py # 注目銘柄ランキングの LINE 通知
+├── watchlist.py      # watchlist（監視対象銘柄）管理
 ├── notifier.py       # 買い候補（entry_candidate）の変化検知・通知ロジック
 ├── monitoring.py     # 銘柄ごとの監視終了条件の判定
 ├── daily_report.py   # 日次監視レポート集計
