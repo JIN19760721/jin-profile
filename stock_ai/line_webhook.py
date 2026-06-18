@@ -192,6 +192,13 @@ def callback():
 
 
 if __name__ == "__main__":
+    if not LINE_CHANNEL_SECRET and os.getenv("ALLOW_INSECURE_WEBHOOK", "").lower() not in ("1", "true"):
+        raise SystemExit(
+            "LINE_CHANNEL_SECRET が未設定です。署名検証なしでWebhookを公開すると "
+            "誰でも watchlist 登録APIを呼べてしまうため起動を中止します。"
+            "意図的に無署名で起動する場合は環境変数 ALLOW_INSECURE_WEBHOOK=1 を設定してください。"
+        )
+
     port = int(os.getenv("WEBHOOK_PORT", "5000"))
     logger.info("LINE Webhook サーバー起動 (port=%d)", port)
     app.run(host="0.0.0.0", port=port)

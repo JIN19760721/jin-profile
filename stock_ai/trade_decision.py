@@ -100,7 +100,12 @@ def compute_metrics(df_code: pd.DataFrame) -> dict:
     df_sorted = df_code.sort_values("datetime")
 
     typical_price = (df_sorted["high"] + df_sorted["low"] + df_sorted["close"]) / 3
-    vwap = (typical_price * df_sorted["volume"]).sum() / df_sorted["volume"].sum()
+    volume_sum = df_sorted["volume"].sum()
+    if volume_sum:
+        vwap = (typical_price * df_sorted["volume"]).sum() / volume_sum
+    else:
+        # 出来高がすべて0（出来高停止・新規上場直後など）はVWAPを定義できないため直近終値で代替する
+        vwap = float(df_sorted["close"].iloc[-1])
 
     volume_ma3 = df_sorted["volume"].tail(3).mean()
     volume_ma6 = df_sorted["volume"].tail(6).mean()
@@ -545,7 +550,11 @@ def run_trade_decision(
             logger.warning("銘柄 %s: 5分足データがないため判定をスキップ", code)
             continue
 
-        metrics = compute_metrics(df_code)
+        try:
+            metrics = compute_metrics(df_code)
+        except Exception as e:
+            logger.warning("銘柄 %s: メトリクス計算に失敗したため判定をスキップ: %s", code, e)
+            continue
         profit_pct = pos["profit_pct"]
         current_price = pos["current_price"]
         vwap = metrics["vwap"]
@@ -675,7 +684,9 @@ def run_trade_decision(
 
         # 新規エントリー（この銘柄の初回判定）はSTAY/WATCHより優先して通知対象の
         # ENTRY とする。STOP_LOSS/TAKE_PROFIT/WATCH_STRONG はより緊急性が高いため上書きしない。
-        if prev is None and signal in ("STAY", "WATCH"):
+        # raw が not None の WATCH（損切り/利確条件の1本目確認中）は警戒状態なので、
+        # 矛盾したラベルにならないよう ENTRY への上書き対象から除外する。
+        if prev is None and (signal == "STAY" or (signal == "WATCH" and raw is None)):
             reason = f"新規エントリー（エントリー価格{pos['entry_price']}、現在価格{current_price}）。{reason}"
             signal = "ENTRY"
 

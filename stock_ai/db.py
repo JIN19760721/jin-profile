@@ -272,8 +272,12 @@ _MONITORING_STATUS_NEW_COLS = [
 
 @contextmanager
 def get_conn():
-    conn = sqlite3.connect(DB_PATH)
+    # main.py / intraday_monitor.py / line_webhook.py が同じDBファイルへ
+    # 別プロセスから同時に書き込むため、WALモード化とリトライ用のbusy_timeoutを設定する。
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
     try:
         yield conn
         conn.commit()
@@ -284,31 +288,31 @@ def get_conn():
         conn.close()
 
 
+def _add_column_if_missing(conn, table: str, col: str, typ: str) -> None:
+    """指定カラムが存在しなければ追加する。「カラム既存」以外のエラーは握り潰さず再送出する"""
+    try:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" not in str(e).lower():
+            raise
+
+
 def _migrate_analysis_results(conn) -> None:
     """analysis_results テーブルに不足カラムを安全に追加する"""
     for col, typ in _ANALYSIS_NEW_COLS:
-        try:
-            conn.execute(f"ALTER TABLE analysis_results ADD COLUMN {col} {typ}")
-        except Exception:
-            pass  # already exists
+        _add_column_if_missing(conn, "analysis_results", col, typ)
 
 
 def _migrate_trade_signals(conn) -> None:
     """trade_signals テーブルに不足カラムを安全に追加する"""
     for col, typ in _TRADE_SIGNALS_NEW_COLS:
-        try:
-            conn.execute(f"ALTER TABLE trade_signals ADD COLUMN {col} {typ}")
-        except Exception:
-            pass  # already exists
+        _add_column_if_missing(conn, "trade_signals", col, typ)
 
 
 def _migrate_monitoring_status(conn) -> None:
     """monitoring_status テーブルに不足カラムを安全に追加する"""
     for col, typ in _MONITORING_STATUS_NEW_COLS:
-        try:
-            conn.execute(f"ALTER TABLE monitoring_status ADD COLUMN {col} {typ}")
-        except Exception:
-            pass  # already exists
+        _add_column_if_missing(conn, "monitoring_status", col, typ)
 
 
 def init_db():

@@ -120,13 +120,19 @@ def _parse_download_df(df: pd.DataFrame, tickers: list[str], codes: list[str]) -
     DB の daily_quotes スキーマに合う辞書リストに変換する。
     """
     results: list[dict] = []
+    # tickers が1件の場合、yf.download は列がMultiIndexにならず単純な列名になるため、
+    # 通常のMultiIndex判定（"Close", ticker）が常にFalseになりサイレントに全件スキップされる。
+    is_multiindex = isinstance(df.columns, pd.MultiIndex)
 
     for ticker, code in zip(tickers, codes):
-        if ("Close", ticker) not in df.columns:
+        if is_multiindex:
+            if ("Close", ticker) not in df.columns:
+                continue
+        elif "Close" not in df.columns:
             continue
         try:
-            # ticker 軸をクロスセクションで取り出す
-            sub = df.xs(ticker, axis=1, level=1)
+            # ticker 軸をクロスセクションで取り出す（単一銘柄の場合はdfそのものを使う）
+            sub = df.xs(ticker, axis=1, level=1) if is_multiindex else df
 
             for dt, row in sub.iterrows():
                 close = _safe_float(row.get("Close"))

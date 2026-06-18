@@ -5,3 +5,4 @@ __pycache__/
 data/*.db
 excel/*.xlsx
 logs/*.log
+ngrok.exe
