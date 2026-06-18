@@ -123,6 +123,31 @@ python main.py --skip-fetch --notify-ranking
 
 ---
 
+## ランキング検証
+
+過去の注目銘柄ランキングが実際に翌営業日も有効だったかを検証します。
+`analysis_results` の指定日のランキング銘柄について翌営業日の株価推移
+（始値・高値・安値・終値）を取得し、`HIT`/`GOOD`/`OK`/`BAD`/`NEUTRAL` で評価します。
+
+```bash
+python main.py --validate-ranking --date 2026-06-15
+```
+
+**判定基準:**
+- `max_gain_pct`（翌日高値が翌日始値から何%上昇したか）が +5% 以上 → `HIT`
+- `max_gain_pct` が +3% 以上 → `GOOD`
+- `close_return_pct`（翌日終値が翌日始値から何%変化したか）が 0% より大きい → `OK`
+- `max_drawdown_pct`（翌日安値が翌日始値から何%下落したか）が -3% 以下 → `BAD`
+- それ以外 → `NEUTRAL`
+
+**注意:**
+- `daily_quotes` に翌営業日のデータがあればそれを使い、なければ yfinance から直接取得します
+- yfinance でも取得できない銘柄はスキップします
+- 既存の注目銘柄ランキング抽出・通知機能（`analyze.py` / `ranking_notifier.py`）は変更しません
+- 自動売買は行いません。出力先は `excel/ranking_validation_{対象日}.xlsx`（シート名: 「ランキング検証」）です
+
+---
+
 ## LINE で銘柄を登録して監視する（Webhook）
 
 ランキング通知を受け取った後、LINE に銘柄コードを返信するだけで
@@ -646,6 +671,7 @@ stock_ai/
 ├── line_notify.py    # LINE Messaging API 送信（push）
 ├── line_webhook.py   # LINE Webhook サーバー（Flask）- 銘柄コード受信 → watchlist 登録
 ├── ranking_notifier.py # 注目銘柄ランキングの LINE 通知
+├── ranking_validation.py # 過去のランキングが翌営業日に有効だったかの検証
 ├── watchlist.py      # watchlist（監視対象銘柄）管理
 ├── notifier.py       # 買い候補（entry_candidate）の変化検知・通知ロジック
 ├── monitoring.py     # 銘柄ごとの監視終了条件の判定

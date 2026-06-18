@@ -341,6 +341,39 @@ def run_daily_report_mode(args, logger):
     logger.info("=" * 60)
 
 
+def run_validate_ranking_mode(args, logger):
+    """
+    指定日の注目銘柄ランキング（analysis_results）について、翌営業日の株価推移を
+    検証し、ランキングが実際に有効だったかを評価する。既存の注目銘柄ランキング
+    抽出・通知機能（analyze.py / ranking_notifier.py）とは独立したフロー。
+    """
+    if not args.date:
+        logger.error("--validate-ranking には --date YYYY-MM-DD の指定が必要です。")
+        sys.exit(1)
+
+    logger.info("=" * 60)
+    logger.info("ランキング検証開始 (対象日=%s)", args.date)
+    logger.info("=" * 60)
+
+    from db import init_db
+    init_db()
+
+    from ranking_validation import validate_ranking
+    df_validation = validate_ranking(args.date)
+
+    if df_validation.empty:
+        logger.warning("対象日 %s の検証結果がありませんでした。", args.date)
+        return
+
+    from export_excel import export_ranking_validation_excel
+    out_path = export_ranking_validation_excel(df_validation, args.date)
+    logger.info("ランキング検証結果出力先: %s", out_path)
+
+    logger.info("=" * 60)
+    logger.info("処理完了")
+    logger.info("=" * 60)
+
+
 def run_backtest_mode(args, logger):
     """
     過去の intraday_prices データを使って現行の判定ロジックをバックテストする。
@@ -406,12 +439,18 @@ def main():
     parser.add_argument("--notify-ranking", action="store_true", help="分析完了後に注目銘柄ランキング上位をLINE通知する")
     parser.add_argument("--ranking-top", type=int, default=None, metavar="N",
                         help="--notify-ranking で通知するランキングの件数（省略時は抽出された全銘柄を通知、指定時は最大20件）")
+    parser.add_argument("--validate-ranking", action="store_true",
+                         help="--date で指定した日の注目銘柄ランキングが翌営業日に有効だったか検証する（--date必須）")
     args = parser.parse_args()
 
     # ログ用の日付（分析前なので暫定で today を使用）
     from datetime import date as _date
     setup_logging(str(_date.today()))
     logger = logging.getLogger("main")
+
+    if args.validate_ranking:
+        run_validate_ranking_mode(args, logger)
+        return
 
     if args.backtest:
         run_backtest_mode(args, logger)

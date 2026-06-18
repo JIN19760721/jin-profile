@@ -559,3 +559,39 @@ def export_backtest_excel(summary: dict, df_trades: pd.DataFrame, run_dt: str) -
     logger.info("Excel 出力完了: %s", out_path)
     return out_path
 
+
+def _write_ranking_validation(wb, df: pd.DataFrame):
+    ws = wb.create_sheet("ランキング検証")
+    col_map = {
+        "rank":              "順位",
+        "code":              "銘柄コード",
+        "company_name":      "銘柄名",
+        "total_score":       "総合スコア",
+        "next_open":         "翌日始値",
+        "next_high":         "翌日高値",
+        "next_low":          "翌日安値",
+        "next_close":        "翌日終値",
+        "max_gain_pct":      "最大上昇率(%)",
+        "max_drawdown_pct":  "最大下落率(%)",
+        "close_return_pct":  "終値リターン(%)",
+        "validation_result": "検証結果",
+    }
+    _write_df(ws, df, col_map, _C["report"])
+    logger.info("ランキング検証シート: %d 行", len(df))
+
+
+def export_ranking_validation_excel(df_validation: pd.DataFrame, target_date: str) -> Path:
+    """
+    ランキング検証結果を Excel に出力して保存パスを返す。
+    """
+    import openpyxl
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    _write_ranking_validation(wb, df_validation)
+
+    out_path = EXCEL_DIR / f"ranking_validation_{target_date}.xlsx"
+    wb.save(out_path)
+    logger.info("Excel 出力完了: %s", out_path)
+    return out_path
+
