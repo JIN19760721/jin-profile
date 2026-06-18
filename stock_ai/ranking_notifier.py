@@ -1,9 +1,10 @@
 """
 注目銘柄ランキングの LINE 通知。
 
-get_latest_ranking(top_n=5) → analysis_results の最新分析日のランキング上位を DataFrame で返す。
-build_ranking_message(df)   → LINE 通知文を構築する。
-notify_ranking(top_n=5)     → ランキングを取得して LINE へ送信する。
+get_latest_ranking(top_n=None) → analysis_results の最新分析日のランキングを DataFrame で返す
+                                  （top_n 省略時は抽出された全銘柄、指定時は上位 top_n 件）。
+build_ranking_message(df)      → LINE 通知文を構築する。
+notify_ranking(top_n=None)     → ランキングを取得して LINE へ送信する（デフォルトで全銘柄）。
 """
 
 import logging
@@ -26,13 +27,15 @@ def _format_code(code) -> str:
     return s
 
 
-def get_latest_ranking(top_n: int = 5) -> pd.DataFrame:
+def get_latest_ranking(top_n: int | None = None) -> pd.DataFrame:
     """
-    analysis_results の最新分析日のランキング上位 top_n 件を返す。
-    top_n は最大 _MAX_TOP_N 件に制限する。
+    analysis_results の最新分析日のランキングを返す。
+    top_n が None（省略時）は抽出された全銘柄、指定時は上位 top_n 件
+    （最大 _MAX_TOP_N 件に制限）を返す。
     データがない場合は空 DataFrame を返す。
     """
-    top_n = min(top_n, _MAX_TOP_N)
+    if top_n is not None:
+        top_n = min(top_n, _MAX_TOP_N)
 
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -44,18 +47,19 @@ def get_latest_ranking(top_n: int = 5) -> pd.DataFrame:
             logger.warning("analysis_results にデータがありません")
             return pd.DataFrame()
 
-        df = pd.read_sql_query(
-            """
+        query = """
             SELECT rank, code, company_name, close, change_pct,
                    volume_ratio_5d, trading_value, total_score, reason
             FROM analysis_results
             WHERE date = ?
             ORDER BY rank ASC
-            LIMIT ?
-            """,
-            conn,
-            params=(latest_date, top_n),
-        )
+        """
+        params: list = [latest_date]
+        if top_n is not None:
+            query += " LIMIT ?"
+            params.append(top_n)
+
+        df = pd.read_sql_query(query, conn, params=params)
         conn.close()
         df.attrs["date"] = latest_date
         logger.info("ランキング取得: 対象日=%s, %d 件", latest_date, len(df))
@@ -101,9 +105,10 @@ def build_ranking_message(df: pd.DataFrame) -> str:
     return "\n\n".join(parts)
 
 
-def notify_ranking(top_n: int = 5) -> bool:
+def notify_ranking(top_n: int | None = None) -> bool:
     """
     最新ランキングを取得して LINE へ送信する。
+    top_n 省略時は抽出された全銘柄を通知する。
     送信失敗時も例外は raise せず False を返す。
     """
     from line_notify import send_line_message

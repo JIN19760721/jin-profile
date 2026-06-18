@@ -404,8 +404,8 @@ def main():
     parser.add_argument("--daily-report", action="store_true", help="取引終了後の日次監視レポートをExcel出力する（--dateで対象日を指定可、省略時は本日）")
     parser.add_argument("--backtest", action="store_true", help="過去のintraday_pricesデータで判定ロジックをバックテストする（--codesで対象銘柄を指定可、省略時は全銘柄）")
     parser.add_argument("--notify-ranking", action="store_true", help="分析完了後に注目銘柄ランキング上位をLINE通知する")
-    parser.add_argument("--ranking-top", type=int, default=10, metavar="N",
-                        help="--notify-ranking で通知するランキングの件数（デフォルト: 10、最大: 20）")
+    parser.add_argument("--ranking-top", type=int, default=None, metavar="N",
+                        help="--notify-ranking で通知するランキングの件数（省略時は抽出された全銘柄を通知、指定時は最大20件）")
     args = parser.parse_args()
 
     # ログ用の日付（分析前なので暫定で today を使用）
@@ -501,8 +501,17 @@ def main():
         logger.error("分析失敗: %s", e, exc_info=True)
         df_result = __import__("pandas").DataFrame()
 
-    # ── Step 6: Excel 出力 ────────────────────────────────────
-    logger.info("[Step 6] Excel 出力")
+    # ── Step 6: watchlist 登録（抽出された全銘柄をデフォルトで登録）──
+    if not df_result.empty:
+        logger.info("[Step 6] watchlist 登録 (%d 件)", len(df_result))
+        try:
+            from watchlist import register_watchlist
+            register_watchlist(df_result["code"].astype(str).tolist(), source="RANKING")
+        except Exception as e:
+            logger.error("watchlist 登録失敗: %s", e, exc_info=True)
+
+    # ── Step 7: Excel 出力 ────────────────────────────────────
+    logger.info("[Step 7] Excel 出力")
     try:
         from export_excel import export_to_excel
         out_path = export_to_excel(df_result, target_date)
@@ -510,9 +519,9 @@ def main():
     except Exception as e:
         logger.error("Excel 出力失敗: %s", e, exc_info=True)
 
-    # ── Step 7: ランキング LINE 通知（--notify-ranking 時のみ）─
+    # ── Step 8: ランキング LINE 通知（--notify-ranking 時のみ。デフォルトで抽出された全銘柄を通知）──
     if args.notify_ranking:
-        logger.info("[Step 7] ランキング LINE 通知 (top_n=%d)", args.ranking_top)
+        logger.info("[Step 8] ランキング LINE 通知 (top_n=%s)", args.ranking_top if args.ranking_top is not None else "全件")
         try:
             from ranking_notifier import notify_ranking
             result = notify_ranking(args.ranking_top)

@@ -78,14 +78,17 @@ python main.py --skip-fetch
 
 ## ランキング通知（LINE）
 
-`--notify-ranking` を付けると、分析（データ取得 → スコアリング → Excel 出力）完了後に
-注目銘柄ランキングの上位 N 件を LINE に自動送信します。
+`--notify-ranking` を付けると、分析（データ取得 → スコアリング → watchlist登録 → Excel 出力）
+完了後に注目銘柄ランキングを LINE に自動送信します。デフォルトでは抽出された全銘柄を通知します。
+
+また、分析で抽出された銘柄は `--notify-ranking` の指定に関わらず、毎回デフォルトで
+watchlist に登録されます（既存の watchlist は置き換わります）。
 
 ```bash
-# 分析してデフォルト（上位10件）を通知
+# 分析してデフォルト（抽出された全銘柄）を通知
 python main.py --notify-ranking
 
-# 件数を指定して通知
+# 件数を指定して通知（上位N件のみ）
 python main.py --notify-ranking --ranking-top 5
 
 # データ取得をスキップして分析 + 通知
@@ -94,8 +97,8 @@ python main.py --skip-fetch --notify-ranking
 
 **注意:**
 - LINE 通知には `LINE_CHANNEL_ACCESS_TOKEN` と `LINE_USER_ID` が必要です（未設定時はログのみ）
-- `--ranking-top` は最大 20 件まで指定できます
-- 通知失敗時もメイン処理（分析・Excel 出力）には影響しません
+- `--ranking-top` を指定する場合は最大 20 件までです（省略時は件数制限なし）
+- 通知失敗時もメイン処理（分析・watchlist登録・Excel 出力）には影響しません
 
 通知文の例:
 
@@ -137,6 +140,8 @@ watch 7203 3778
 - 4桁数字のみ抽出（重複除外）
 - 最大5銘柄。超過時はエラー返信
 - 本日の注目銘柄ランキングに含まれる銘柄のみ登録可能（ランキング外は登録せず返信）
+- `python main.py` 実行時にデフォルトで抽出された全銘柄が watchlist に登録されるため、
+  Webhook 経由の手動登録はその日のうちに次回の `main.py` 実行で上書きされます
 - 登録すると既存の watchlist は全て置き換わる
 
 ### LINE 返信例
