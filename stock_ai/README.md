@@ -96,11 +96,10 @@ streamlit run app.py
 
 起動するとブラウザで `http://localhost:8501` が自動的に開きます。
 
-`run_gui.bat` はStreamlit起動前に、プロジェクトルートに `ngrok.exe` があれば
-別ウィンドウで `ngrok.exe http 5000` も自動起動します（LINE Webhook 用、
-`line_webhook.py` の Flask サーバーが使うポート）。`ngrok.exe` が無い場合は
-警告を表示してスキップし、Streamlit のみ起動します。LINE Webhook 自体
-（`python line_webhook.py`）は別途起動が必要です。
+`run_gui.bat` はStreamlit起動前に、LINE Webhook サーバー（`python line_webhook.py`、
+ポート5000）も別ウィンドウで自動起動します。外部公開用の ngrok トンネル
+（`ngrok http 5000`）は自動起動されないため、LINE Webhookを使う場合は別途
+手動で起動してください（後述「LINE で銘柄を登録して監視する」参照）。
 
 ### 画面でできること
 
@@ -246,15 +245,13 @@ LINE_USER_ID=your_line_user_id
 python line_webhook.py
 ```
 
+（`run_gui.bat` でGUIを起動した場合は、このステップは自動実行されます）
+
 #### 3. ngrok で外部公開（ローカル開発時）
 
 ```bash
 ngrok http 5000
 ```
-
-（`run_gui.bat` でGUIを起動した場合は、プロジェクトルートに `ngrok.exe` があれば
-このステップは自動実行されます。手動で `python line_webhook.py` を起動するワークフローでは
-このコマンドを別途実行してください。）
 
 ngrok が発行した URL（例: `https://xxxxx.ngrok-free.app`）を
 LINE Developers の「Messaging API 設定」→「Webhook URL」に設定します。
