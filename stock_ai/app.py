@@ -62,6 +62,38 @@ def read_sql(query: str, params: tuple = ()) -> pd.DataFrame:
 # trade_signals.final_action に保存された値を表示するのみ（GUI側での再計算は行わない）。
 
 
+def get_intraday_target_preview(manual_codes: list[str]) -> tuple[list[str], str]:
+    """
+    main.py の run_intraday_mode() と同じ優先順位（--codes > watchlist > ランキング上位5件）
+    で監視対象を判定して返す（表示専用のプレビュー）。
+    実際の「監視実行」ボタン押下時は main.py --intraday を subprocess で呼ぶだけで、
+    対象選定は main.py 側が独自に行う。ここで使う判定関数（parse_codes /
+    get_active_watchlist / get_top_ranked_codes / get_stopped_codes）は main.py と
+    完全に同一のものを再利用しており、選定ロジックを重複実装していない。
+    """
+    from code_parser import parse_codes
+    from db import get_stopped_codes
+    from watchlist import get_active_watchlist, get_top_ranked_codes
+
+    parsed = parse_codes(manual_codes)
+    if parsed:
+        codes, source = parsed, "--codes指定"
+    else:
+        watchlist_rows = get_active_watchlist()
+        if watchlist_rows:
+            codes, source = [w["code"] for w in watchlist_rows], "watchlist"
+        else:
+            ranked = get_top_ranked_codes(limit=5)
+            if ranked:
+                codes, source = ranked, "ranking fallback"
+            else:
+                codes, source = [], "対象なし"
+
+    stopped = get_stopped_codes()
+    codes = [c for c in codes if c not in stopped]
+    return codes, source
+
+
 # ── サイドバー ────────────────────────────────────────────────
 
 st.sidebar.header("設定")
@@ -89,6 +121,14 @@ if auto_refresh:
 # ── メイン画面: 操作ボタン ────────────────────────────────────
 
 st.title("stock_ai 操作パネル")
+
+preview_codes, preview_source = get_intraday_target_preview(codes_list)
+st.subheader("監視対象（5分足監視実行の対象、main.pyと同じ優先順位で判定）")
+if preview_codes:
+    st.text("\n".join(f"{c} ({preview_source})" for c in preview_codes))
+else:
+    st.warning("監視対象がありません（--codes未指定・watchlist空・ランキングデータなし）。"
+               "サイドバーに銘柄コードを入力するか、ランキングを作成してください。")
 
 col1, col2, col3, col4, col5 = st.columns(5)
 
