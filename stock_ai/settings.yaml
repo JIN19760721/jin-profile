@@ -21,6 +21,9 @@ trade_decision:
   entry_score_rank_threshold: 10          # 注目銘柄ランキングの「上位」とみなす順位
   entry_score_threshold: 85               # ENTRY_SCOREがこの値以上で買いエントリー候補=ENTRY
   watch_candidate_threshold: 70           # ENTRY_SCOREがこの値以上(ENTRY未満)で買いエントリー候補=WATCH
+  buy_score_threshold: 85                 # final_action=BUY判定に必要なENTRY_SCOREの最低値
+  notify_final_action_buy: true           # final_action=BUY（変化時）をLINE通知するか
+  notify_final_action_sell: true          # final_action=SELL（変化時）をLINE通知するか
 
   entry_score_points:                     # ENTRY_SCORE（compute_entry_score）の配点
     vwap_above: 20                        # 現在価格がVWAPより上

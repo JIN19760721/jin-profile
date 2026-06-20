@@ -379,6 +379,9 @@ def _write_trade_signals(wb, df: pd.DataFrame):
         "entry_score":                "ENTRY_SCORE",
         "entry_candidate":            "買いエントリー候補判定",
         "entry_factors":              "ENTRY_SCORE内訳",
+        "final_action":               "売買判断(BUY/WAIT/SELL)",
+        "final_action_score":         "売買判断スコア",
+        "final_action_reason":        "売買判断理由",
     }
     _write_df(ws, df, col_map, _C["signal"])
     logger.info("デイトレ判定シート: %d 行", len(df))
@@ -412,6 +415,21 @@ def _write_entry_candidate_history(wb, df: pd.DataFrame):
     }
     _write_df(ws, df, col_map, _C["profit"])
     logger.info("買い候補変化履歴シート: %d 行", len(df))
+
+
+def _write_final_action_history(wb, df: pd.DataFrame):
+    ws = wb.create_sheet("売買判断変化履歴")
+    col_map = {
+        "code":                     "銘柄コード",
+        "previous_final_action":    "前回売買判断",
+        "current_final_action":     "現在売買判断",
+        "changed_flag":             "変化フラグ",
+        "final_action_score":       "売買判断スコア",
+        "reason":                   "理由",
+        "signal_datetime":          "判定時刻",
+    }
+    _write_df(ws, df, col_map, _C["profit"])
+    logger.info("売買判断変化履歴シート: %d 行", len(df))
 
 
 def _write_daily_report(wb, df: pd.DataFrame):
@@ -470,10 +488,11 @@ def export_intraday_excel(
     df_signals: pd.DataFrame | None = None,
     df_history: pd.DataFrame | None = None,
     df_entry_history: pd.DataFrame | None = None,
+    df_final_action_history: pd.DataFrame | None = None,
 ) -> Path:
     """
     5分足データ（と、あれば損益計算結果・デイトレ判定結果・シグナル変化履歴・
-    買い候補変化履歴）を Excel に出力して保存パスを返す。
+    買い候補変化履歴・売買判断変化履歴）を Excel に出力して保存パスを返す。
     """
     import openpyxl
     wb = openpyxl.Workbook()
@@ -488,6 +507,8 @@ def export_intraday_excel(
         _write_signal_history(wb, df_history)
     if df_entry_history is not None and not df_entry_history.empty:
         _write_entry_candidate_history(wb, df_entry_history)
+    if df_final_action_history is not None and not df_final_action_history.empty:
+        _write_final_action_history(wb, df_final_action_history)
 
     out_path = EXCEL_DIR / f"intraday_prices_{run_dt}.xlsx"
     wb.save(out_path)

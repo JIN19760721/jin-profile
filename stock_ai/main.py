@@ -157,13 +157,20 @@ def run_intraday_mode(args, logger):
         watchlist = get_active_watchlist()
         if watchlist:
             codes = [w["code"] for w in watchlist]
-            logger.info("watchlist から監視銘柄を取得: %s", codes)
+            logger.info("watchlistから監視銘柄を取得: %s", codes)
         else:
-            logger.error(
-                "--codes が未指定で watchlist にも銘柄がありません。"
-                "--codes で銘柄を指定するか、LINE で銘柄コードを送信して watchlist に登録してください。"
-            )
-            sys.exit(1)
+            # watchlist も空の場合は最新の注目銘柄ランキング上位5件にフォールバック
+            from watchlist import get_top_ranked_codes
+            codes = get_top_ranked_codes(limit=5)
+            if codes:
+                logger.info("watchlistが空のためランキング上位5件を利用")
+                logger.info("ranking codes: %s", codes)
+            else:
+                logger.error(
+                    "--codes が未指定で watchlist・注目銘柄ランキングにも銘柄がありません。"
+                    "--codes で銘柄を指定するか、LINE で銘柄コードを送信して watchlist に登録してください。"
+                )
+                sys.exit(1)
 
     from db import get_stopped_codes
     stopped_codes = get_stopped_codes()
@@ -299,10 +306,55 @@ def run_intraday_mode(args, logger):
         upsert_entry_candidate_history(entry_history_rows)
     df_entry_history = pd.DataFrame(entry_history_rows)
 
+    # final_action（BUY/WAIT/SELL）の変化検知・通知は、上記の signal / entry_candidate の
+    # 通知とは完全に別管理（final_action_history）で扱う。trade_signals.signal /
+    # entry_candidate は変更しない。自動売買は行わず、LINE通知による判断支援のみ。
+    from config import NOTIFY_FINAL_ACTION_BUY, NOTIFY_FINAL_ACTION_SELL
+    from db import get_latest_final_action, upsert_final_action_history
+
+    final_action_history_rows = []
+    for _, row in df_signals.iterrows():
+        code = row["code"]
+        prev_final_action = get_latest_final_action(code)
+        previous_final_action = prev_final_action["current_final_action"] if prev_final_action else None
+        current_final_action = row["final_action"]
+        changed_flag = notifier.compute_final_action_changed_flag(previous_final_action, current_final_action)
+
+        final_action_history_rows.append({
+            "code":                   code,
+            "signal_datetime":        row["signal_datetime"],
+            "previous_final_action":  previous_final_action,
+            "current_final_action":   current_final_action,
+            "changed_flag":           int(changed_flag),
+            "final_action_score":     row["final_action_score"],
+            "reason":                 row["final_action_reason"],
+        })
+
+        if changed_flag:
+            logger.info(
+                "[FINAL_ACTION_CHANGE]\n%s\n%s → %s (SCORE=%s)",
+                code, previous_final_action or "(初回)", current_final_action, row["final_action_score"],
+            )
+
+        if args.notify_line and notifier.should_notify_final_action(
+            current_final_action, changed_flag, NOTIFY_FINAL_ACTION_BUY, NOTIFY_FINAL_ACTION_SELL
+        ):
+            company_name = get_company_name(code)
+            send_line_message(notifier.build_final_action_message(
+                code, company_name, current_final_action,
+                row["current_price"], row["entry_score"], row["final_action_reason"],
+            ))
+
+    if final_action_history_rows:
+        upsert_final_action_history(final_action_history_rows)
+    df_final_action_history = pd.DataFrame(final_action_history_rows)
+
     from datetime import datetime
     from export_excel import export_intraday_excel
     run_dt = datetime.now().strftime("%Y-%m-%d_%H%M")
-    out_path = export_intraday_excel(df_prices, run_dt, df_positions, df_signals, df_history, df_entry_history)
+    out_path = export_intraday_excel(
+        df_prices, run_dt, df_positions, df_signals, df_history, df_entry_history, df_final_action_history
+    )
     logger.info("出力先: %s", out_path)
 
     logger.info("=" * 60)

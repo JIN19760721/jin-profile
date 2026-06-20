@@ -76,6 +76,34 @@ python main.py --skip-fetch
 
 ---
 
+## Windows GUI（ブラウザ操作パネル）
+
+CLI のオプションを覚えなくても、ブラウザから注目銘柄ランキング作成・LINE通知・5分足監視・日次レポート・バックテストなどを操作できる Streamlit 製 GUI です。既存の分析・監視ロジック（analyze.py / trade_decision.py / intraday_monitor.py 等）は変更せず、内部では同じ main.py / 各モジュールを呼び出しています。**自動売買機能は含まれません（表示・通知・手動操作のみ）。**
+
+### 起動方法
+
+```bash
+# ライブラリインストール済みなら、stock_ai フォルダで run_gui.bat をダブルクリック
+run_gui.bat
+```
+
+または手動で：
+
+```bash
+cd stock_ai
+streamlit run app.py
+```
+
+起動するとブラウザで `http://localhost:8501` が自動的に開きます。
+
+### 画面でできること
+
+- サイドバー: 監視銘柄コード入力、entry_mode 選択、ランキング通知件数、自動更新ON/OFF・間隔
+- 操作ボタン: ランキング作成 / ランキングをLINE通知 / 5分足監視実行 / 日次レポート作成 / バックテスト実行 / watchlist登録
+- 表示タブ: 最新ランキング、watchlist、5分足データ＋チャート（終値・VWAP・entry_price・atr_stop_price）、デイトレ判定一覧、BUY/WAIT/SELL（DBの`final_action`をそのまま表示。GUI側での再判定は行わない）、日次レポート、settings.yaml の主要設定
+
+---
+
 ## ランキング通知（LINE）
 
 `--notify-ranking` を付けると、分析（データ取得 → スコアリング → watchlist登録 → Excel 出力）
@@ -264,8 +292,55 @@ python main.py --intraday --codes 7203 3778 --entry-mode manual --notify-line
 - `--entry-mode`: `first_close`（デフォルト）または `manual`
 - `--notify-line`: 付与した場合のみ LINE へ通知する（未指定時はログ出力のみ）
 - 結果は `data/stocks.db` の `intraday_prices` / `intraday_positions` / `trade_signals` /
-  `signal_history` テーブルと、`excel/intraday_prices_YYYY-MM-DD_HHMM.xlsx`
-  （5分足データ・損益計算・デイトレ判定・シグナル変化履歴の各シート）に出力されます
+  `signal_history` / `entry_candidate_history` / `final_action_history` テーブルと、
+  `excel/intraday_prices_YYYY-MM-DD_HHMM.xlsx`
+  （5分足データ・損益計算・デイトレ判定・シグナル変化履歴・買い候補変化履歴・
+  売買判断変化履歴の各シート）に出力されます
+
+### signal / entry_candidate / final_action の違い
+
+このツールは3つの独立した判定値を持ちます。**いずれも自動売買ではなく、判断支援のための表示・通知のみです。**
+
+| 判定値 | 役割 | 値 | 通知条件 |
+|---|---|---|---|
+| `signal` | 損益率・VWAP・前日高安・出来高・ATR等から決まる本体のデイトレ判定 | `STAY` / `WATCH` / `WATCH_STRONG` / `TAKE_PROFIT` / `STOP_LOSS` / `ENTRY`（初回監視開始） | `signal_history.changed_flag=True` かつ `ENTRY/WATCH/WATCH_STRONG/TAKE_PROFIT/STOP_LOSS` への変化時 |
+| `entry_candidate` | ENTRY_SCORE（VWAP上/前日高値ブレイク/出来高急増継続/ランキング等の加点）に基づく買いエントリー候補判定 | `ENTRY` / `WATCH` / `NO_ENTRY` | `entry_candidate_history` で `NO_ENTRY→WATCH`・`WATCH→ENTRY`・`NO_ENTRY→ENTRY`（=ENTRYへの変化）時 |
+| `final_action` | `signal` と `entry_candidate` の両方を入力にした売買判断（`trade_decision.compute_final_action()`、独立した新規フロー） | `BUY` / `WAIT` / `SELL` | `final_action_history.changed_flag=True` かつ `BUY`/`SELL` への変化時のみ |
+
+#### BUY / WAIT / SELL の意味
+
+- **SELL**: `signal` が `STOP_LOSS` / `TAKE_PROFIT` に確定した場合、または `WATCH_STRONG`（急騰急落の強い警戒）かつ損益がプラスの場合
+- **BUY**: `entry_candidate=ENTRY` かつ `entry_score >= trade_decision.buy_score_threshold` かつ現在価格がVWAPより上かつ出来高急増が継続中（かつ `signal` が `STOP_LOSS`/`TAKE_PROFIT`/`WATCH_STRONG` のいずれでもない）場合
+- **WAIT**: 上記いずれにも該当しない場合（買いでも売りでもない待機状態）
+
+#### BUY / SELL のLINE通知条件
+
+`--notify-line` 指定時、`final_action` が **前回から変化して BUY または SELL になった場合のみ**LINE通知します（`WAIT` への変化や、BUY→BUY・SELL→SELL のような同一継続は通知しません）。
+
+| 変化 | 通知 |
+|---|---|
+| 初回でBUY / WAIT→BUY | 〇（`trade_decision.notify_final_action_buy: true` の場合） |
+| 初回でSELL / WAIT→SELL / BUY→SELL | 〇（`trade_decision.notify_final_action_sell: true` の場合） |
+| BUY→WAIT / SELL→WAIT / 同一継続（BUY→BUY 等） | × |
+
+通知文の例：
+
+```
+【売買判断】
+3237
+
+BUY
+
+現在値：90円
+ENTRY_SCORE：88
+理由：
+ENTRY_SCOREが高く、VWAP上、出来高急増が継続しているためBUY
+
+注意：
+これは自動売買ではなく判断支援です。
+```
+
+**自動売買は実装していません。** `final_action` はあくまで判定結果の表示・通知のみで、注文の発注などは一切行いません。
 
 ### 判定条件の設定（settings.yaml）
 
@@ -293,6 +368,9 @@ python main.py --intraday --codes 7203 3778 --entry-mode manual --notify-line
 | `trade_decision.entry_score_rank_threshold` | 注目銘柄ランキングの「上位」とみなす順位 | 10 |
 | `trade_decision.entry_score_threshold` | ENTRY_SCOREがこの値以上で`ENTRY` | 85 |
 | `trade_decision.watch_candidate_threshold` | ENTRY_SCOREがこの値以上(ENTRY未満)で`WATCH` | 70 |
+| `trade_decision.buy_score_threshold` | `final_action=BUY`判定に必要なENTRY_SCOREの最低値 | 85 |
+| `trade_decision.notify_final_action_buy` | `final_action=BUY`（変化時）をLINE通知するか | true |
+| `trade_decision.notify_final_action_sell` | `final_action=SELL`（変化時）をLINE通知するか | true |
 | `monitoring.time_limit` | この時刻を過ぎたら監視終了 | "15:20" |
 | `notification.duplicate_suppress_window_minutes` | 同一銘柄・同一シグナルのLINE通知抑制時間（分） | 30 |
 
@@ -673,7 +751,7 @@ stock_ai/
 ├── ranking_notifier.py # 注目銘柄ランキングの LINE 通知
 ├── ranking_validation.py # 過去のランキングが翌営業日に有効だったかの検証
 ├── watchlist.py      # watchlist（監視対象銘柄）管理
-├── notifier.py       # 買い候補（entry_candidate）の変化検知・通知ロジック
+├── notifier.py       # 買い候補（entry_candidate）・売買判断（final_action）の変化検知・通知ロジック
 ├── monitoring.py     # 銘柄ごとの監視終了条件の判定
 ├── daily_report.py   # 日次監視レポート集計
 ├── data/             # SQLite DB

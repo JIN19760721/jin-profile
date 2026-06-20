@@ -169,6 +169,18 @@ CREATE TABLE IF NOT EXISTS entry_candidate_history (
     PRIMARY KEY (code, signal_datetime)
 );
 
+CREATE TABLE IF NOT EXISTS final_action_history (
+    code                     TEXT NOT NULL,
+    signal_datetime          TEXT NOT NULL,
+    previous_final_action    TEXT,
+    current_final_action     TEXT,
+    changed_flag             INTEGER,
+    final_action_score       INTEGER,
+    reason                   TEXT,
+    created_at               TEXT DEFAULT (datetime('now', 'localtime')),
+    PRIMARY KEY (code, signal_datetime)
+);
+
 CREATE TABLE IF NOT EXISTS monitoring_status (
     code        TEXT PRIMARY KEY,
     status      TEXT NOT NULL DEFAULT 'ACTIVE',
@@ -262,6 +274,9 @@ _TRADE_SIGNALS_NEW_COLS = [
     ("entry_score",             "INTEGER"),
     ("entry_candidate",         "TEXT"),
     ("entry_factors",           "TEXT"),
+    ("final_action",            "TEXT"),
+    ("final_action_score",      "INTEGER"),
+    ("final_action_reason",     "TEXT"),
 ]
 
 # monitoring_status に追加するカラム
@@ -457,8 +472,9 @@ def upsert_trade_signals(rows: list[dict]):
          volume_ma12, volume_ratio_3_12, volume_surge_continuation, volume_fading,
          atr_14, atr_stop_price, atr_stop_loss_flag,
          signal_score, positive_factors, negative_factors, risk_level, signal_changed,
-         market_sentiment, market_change_pct, entry_score, entry_candidate, entry_factors)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         market_sentiment, market_change_pct, entry_score, entry_candidate, entry_factors,
+         final_action, final_action_score, final_action_reason)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     data = [
         (r["code"], r["signal_datetime"], r["current_price"], r["entry_price"],
@@ -473,7 +489,8 @@ def upsert_trade_signals(rows: list[dict]):
          r["atr_14"], r["atr_stop_price"], r["atr_stop_loss_flag"],
          r["signal_score"], r["positive_factors"], r["negative_factors"], r["risk_level"],
          r["signal_changed"], r["market_sentiment"], r["market_change_pct"],
-         r["entry_score"], r["entry_candidate"], r["entry_factors"])
+         r["entry_score"], r["entry_candidate"], r["entry_factors"],
+         r["final_action"], r["final_action_score"], r["final_action_reason"])
         for r in rows
     ]
     with get_conn() as conn:
@@ -519,6 +536,34 @@ def get_latest_entry_candidate(code: str) -> dict | None:
     with get_conn() as conn:
         cursor = conn.execute(
             "SELECT * FROM entry_candidate_history WHERE code = ? ORDER BY signal_datetime DESC LIMIT 1",
+            (code,),
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def upsert_final_action_history(rows: list[dict]):
+    sql = """
+        INSERT OR REPLACE INTO final_action_history
+        (code, signal_datetime, previous_final_action, current_final_action,
+         changed_flag, final_action_score, reason)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """
+    data = [
+        (r["code"], r["signal_datetime"], r["previous_final_action"], r["current_final_action"],
+         r["changed_flag"], r["final_action_score"], r["reason"])
+        for r in rows
+    ]
+    with get_conn() as conn:
+        conn.executemany(sql, data)
+    logger.info("売買判断変化履歴保存: %d 件", len(data))
+
+
+def get_latest_final_action(code: str) -> dict | None:
+    """指定銘柄の直前の売買判断（final_action_history）を1件返す。なければ None"""
+    with get_conn() as conn:
+        cursor = conn.execute(
+            "SELECT * FROM final_action_history WHERE code = ? ORDER BY signal_datetime DESC LIMIT 1",
             (code,),
         )
         row = cursor.fetchone()

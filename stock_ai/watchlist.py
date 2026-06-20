@@ -128,3 +128,29 @@ def get_active_watchlist() -> list[dict]:
     """is_active=1 の監視対象銘柄一覧を返す"""
     from db import get_active_watchlist as _db_get
     return _db_get()
+
+
+def get_top_ranked_codes(limit: int = 5) -> list[str]:
+    """
+    analysis_results の最新分析日のランキング上位 limit 件のコードを返す。
+    --codes 未指定かつ watchlist が空の場合の、--intraday のフォールバック先として使う。
+    データがなければ空リストを返す。
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        row = conn.execute("SELECT MAX(date) FROM analysis_results").fetchone()
+        latest_date = row[0] if row and row[0] else None
+        if not latest_date:
+            conn.close()
+            logger.warning("analysis_results にデータがありません")
+            return []
+
+        rows = conn.execute(
+            "SELECT code FROM analysis_results WHERE date = ? ORDER BY rank ASC LIMIT ?",
+            (latest_date, limit),
+        ).fetchall()
+        conn.close()
+        return [r[0] for r in rows]
+    except Exception as e:
+        logger.error("ランキング上位取得エラー: %s", e)
+        return []

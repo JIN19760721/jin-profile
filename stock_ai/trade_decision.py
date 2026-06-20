@@ -47,6 +47,7 @@ from config import (
     ATR_PERIOD as _ATR_PERIOD,
     ATR_STOP_MULTIPLIER as _ATR_STOP_MULTIPLIER,
     BAR_CHANGE_STRONG_PCT as _BAR_CHANGE_STRONG_PCT,
+    BUY_SCORE_THRESHOLD as _BUY_SCORE_THRESHOLD,
     CONFIRM_BARS as _CONFIRM_BARS,
     ENTRY_SCORE_POINTS as _ENTRY_SCORE_POINTS,
     ENTRY_SCORE_THRESHOLD as _ENTRY_SCORE_THRESHOLD,
@@ -373,6 +374,90 @@ def compute_entry_score(ctx: dict) -> dict:
     return {"entry_score": score, "entry_candidate": entry_candidate, "entry_factors": factors}
 
 
+def compute_final_action(row: dict) -> dict:
+    """
+    売買判断（final_action）を BUY / WAIT / SELL の3値で判定する。
+    既存の signal（STAY/WATCH/WATCH_STRONG/TAKE_PROFIT/STOP_LOSS/ENTRY）・
+    entry_candidate（ENTRY/WATCH/NO_ENTRY）はどちらも変更せず、それらの値を
+    入力として独立に判定する新規フロー（自動売買は行わず判断支援のみ）。
+
+    優先順位 SELL > BUY > WAIT。
+
+    SELL: 以下のいずれかに該当
+      - signal が STOP_LOSS
+      - signal が TAKE_PROFIT
+      - signal が WATCH_STRONG かつ profit_pct > 0
+
+    BUY: SELL条件に該当せず、以下をすべて満たす
+      - entry_candidate が ENTRY
+      - entry_score が settings.yaml の buy_score_threshold 以上
+      - current_price が vwap より上
+      - volume_surge_continuation が True
+      - signal が STOP_LOSS / TAKE_PROFIT / WATCH_STRONG のいずれでもない
+
+    WAIT: 上記以外。
+
+    必須キー: signal, profit_pct, entry_candidate, entry_score, current_price, vwap,
+    volume_surge_continuation
+    """
+    signal = row["signal"]
+    profit_pct = row.get("profit_pct") or 0.0
+    entry_candidate = row.get("entry_candidate")
+    entry_score = row.get("entry_score") or 0
+    current_price = row.get("current_price")
+    vwap = row.get("vwap")
+    volume_surge_continuation = bool(row.get("volume_surge_continuation"))
+
+    is_sell = bool(
+        signal == "STOP_LOSS"
+        or signal == "TAKE_PROFIT"
+        or (signal == "WATCH_STRONG" and profit_pct > 0)
+    )
+
+    if is_sell:
+        if signal == "STOP_LOSS":
+            reason = "STOP_LOSSが確定したためSELL"
+        elif signal == "TAKE_PROFIT":
+            reason = "TAKE_PROFITが確定したためSELL"
+        else:
+            reason = "WATCH_STRONG（急騰急落の強い警戒）かつ利益が出ているためSELL"
+        return {
+            "final_action": "SELL",
+            "final_action_score": 100,
+            "final_action_reason": reason,
+        }
+
+    not_sell_signal = signal not in ("STOP_LOSS", "TAKE_PROFIT", "WATCH_STRONG")
+    above_vwap = bool(current_price is not None and vwap is not None and current_price > vwap)
+
+    is_buy = bool(
+        entry_candidate == "ENTRY"
+        and entry_score >= _BUY_SCORE_THRESHOLD
+        and above_vwap
+        and volume_surge_continuation
+        and not_sell_signal
+    )
+
+    if is_buy:
+        score = entry_score
+        if above_vwap:
+            score += 5
+        if volume_surge_continuation:
+            score += 5
+        score = max(0, min(100, score))
+        return {
+            "final_action": "BUY",
+            "final_action_score": score,
+            "final_action_reason": "ENTRY_SCOREが高く、VWAP上、出来高急増が継続しているためBUY",
+        }
+
+    return {
+        "final_action": "WAIT",
+        "final_action_score": max(0, min(100, entry_score)),
+        "final_action_reason": "BUY/SELLの条件を満たさないためWAIT",
+    }
+
+
 def compute_factors(ctx: dict) -> dict:
     """
     STAY/WATCH寄りの判断材料を検出し、(ラベル, reason用フレーズ) のリストと
@@ -690,6 +775,16 @@ def run_trade_decision(
             reason = f"新規エントリー（エントリー価格{pos['entry_price']}、現在価格{current_price}）。{reason}"
             signal = "ENTRY"
 
+        final_action_info = compute_final_action({
+            "signal":                    signal,
+            "profit_pct":                profit_pct,
+            "entry_candidate":           entry_score_info["entry_candidate"],
+            "entry_score":               entry_score_info["entry_score"],
+            "current_price":             current_price,
+            "vwap":                      vwap,
+            "volume_surge_continuation": metrics["volume_surge_continuation"],
+        })
+
         previous_signal = prev.get("signal") if prev is not None else None
         history_changed_flag = bool(signal != previous_signal and signal in _EVENT_SIGNALS)
         history_rows.append({
@@ -743,6 +838,9 @@ def run_trade_decision(
             "entry_score":              entry_score_info["entry_score"],
             "entry_candidate":          entry_score_info["entry_candidate"],
             "entry_factors":            "、".join(entry_score_info["entry_factors"]),
+            "final_action":             final_action_info["final_action"],
+            "final_action_score":       final_action_info["final_action_score"],
+            "final_action_reason":      final_action_info["final_action_reason"],
         })
 
     if signals:

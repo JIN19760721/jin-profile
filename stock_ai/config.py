@@ -53,6 +53,9 @@ _SETTINGS_DEFAULTS = {
         "entry_score_rank_threshold":      10,
         "entry_score_threshold":           85,
         "watch_candidate_threshold":       70,
+        "buy_score_threshold":             85,
+        "notify_final_action_buy":         True,
+        "notify_final_action_sell":        True,
         "entry_score_points": {
             "vwap_above":                  20,
             "prev_high_breakout":          20,
@@ -125,6 +128,9 @@ ENTRY_SCORE_RANK_THRESHOLD = _TD["entry_score_rank_threshold"]
 ENTRY_SCORE_THRESHOLD = _TD["entry_score_threshold"]
 WATCH_CANDIDATE_THRESHOLD = _TD["watch_candidate_threshold"]
 ENTRY_SCORE_POINTS = _TD["entry_score_points"]
+BUY_SCORE_THRESHOLD = _TD["buy_score_threshold"]
+NOTIFY_FINAL_ACTION_BUY = _TD["notify_final_action_buy"]
+NOTIFY_FINAL_ACTION_SELL = _TD["notify_final_action_sell"]
 
 MONITORING_TIME_LIMIT = _parse_hhmm(_SETTINGS["monitoring"]["time_limit"])
 
