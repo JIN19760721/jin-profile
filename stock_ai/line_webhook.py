@@ -2,7 +2,13 @@
 LINE Messaging API Webhook サーバー。
 
 銘柄コードを含むメッセージを受信して watchlist に登録し、結果を LINE に返信する。
-自動売買は行わない。watchlist 登録のみ。
+取引日でなければ何もせず「取引日ではありません」と返信する。取引時間内であれば、
+登録した銘柄の5分足監視（main.py --intraday）をバックグラウンドで非同期に起動する
+（Webhookの応答はその完了を待たない）。
+
+このプロセス自身が、Windowsタスクスケジューラを使わずに、取引時間中5分おきに
+watchlist銘柄の5分足監視を定期実行するスケジューラスレッドも兼ねる
+（_run_scheduler_loop）。自動売買は行わない。
 
 起動方法:
     python line_webhook.py
@@ -19,17 +25,31 @@ import json
 import logging
 import os
 import re
+import subprocess
+import sys
+import threading
+import time as time_module
+from datetime import datetime
+from pathlib import Path
 
 import requests
 from flask import Flask, abort, request
 
-from config import LINE_CHANNEL_ACCESS_TOKEN, LINE_CHANNEL_SECRET
+from config import (
+    LINE_CHANNEL_ACCESS_TOKEN,
+    LINE_CHANNEL_SECRET,
+    LOGS_DIR,
+    is_market_open_now,
+    is_trading_day,
+)
 from watchlist import (
     get_active_watchlist,
     parse_watch_codes,
     register_watchlist,
     validate_codes_in_latest_ranking,
 )
+
+_BASE_DIR = Path(__file__).parent
 
 logging.basicConfig(
     level=logging.INFO,
@@ -88,6 +108,67 @@ def _reply(reply_token: str, text: str) -> None:
         logger.error("LINE返信エラー: %s", e)
 
 
+# ── 5分足監視のバックグラウンド起動・定期実行 ──────────────────────────────────
+
+_monitor_lock = threading.Lock()
+_current_proc: subprocess.Popen | None = None
+
+_SCHEDULER_ACTIVE_INTERVAL_SECONDS = 300  # 取引時間中の実行間隔（5分）
+_SCHEDULER_IDLE_POLL_SECONDS = 60         # 取引時間外・休日の再チェック間隔（1分）
+
+
+def _trigger_intraday_monitoring(codes: list[str] | None = None) -> None:
+    """
+    5分足監視（main.py --intraday）をバックグラウンドで非同期に起動する。
+    codes 省略時は --codes を渡さず、main.py 側の優先順位
+    （--codes > watchlist > ランキング上位5件）に従う。
+    Webhookハンドラの応答（LINEへの返信）はこの完了を待たない
+    （LINE Webhookは数秒以内の応答を期待するため、ここで同期的に待つとタイムアウト・
+    イベント再送の原因になる）。判定結果は --notify-line により別途LINEへ通知される。
+    前回起動分がまだ実行中の場合は今回の起動をスキップする（重複実行防止）。
+    """
+    global _current_proc
+
+    with _monitor_lock:
+        if _current_proc is not None and _current_proc.poll() is None:
+            logger.info("前回の5分足監視がまだ実行中のため、今回の起動をスキップします。")
+            return
+
+        log_path = LOGS_DIR / f"webhook_intraday_{datetime.now():%Y%m%d}.log"
+        cmd = [
+            sys.executable, str(_BASE_DIR / "main.py"), "--intraday",
+            "--entry-mode", "first_close", "--notify-line",
+        ]
+        if codes:
+            cmd += ["--codes", *codes]
+
+        log_file = open(log_path, "a", encoding="utf-8")
+        try:
+            _current_proc = subprocess.Popen(cmd, cwd=str(_BASE_DIR), stdout=log_file, stderr=log_file)
+            logger.info("5分足監視をバックグラウンドで起動しました: %s (log=%s)", codes or "(watchlist/ランキング)", log_path)
+        finally:
+            log_file.close()
+
+
+def _run_scheduler_loop() -> None:
+    """
+    Windowsタスクスケジューラを使わず、このプロセス自身が取引時間中5分おきに
+    watchlist銘柄の5分足監視を定期実行するバックグラウンドループ。
+    取引時間外・休日は60秒おきに状態を再チェックするだけで監視は実行しない
+    （取引開始を遅延なく検知するため、5分間隔より短いポーリングにしている）。
+    """
+    logger.info("5分足監視スケジューラを起動しました（取引時間中は%d秒おきに自動実行）", _SCHEDULER_ACTIVE_INTERVAL_SECONDS)
+    while True:
+        if is_market_open_now():
+            try:
+                _trigger_intraday_monitoring()
+            except Exception as e:
+                logger.error("定期監視の起動に失敗しました: %s", e, exc_info=True)
+            time_module.sleep(_SCHEDULER_ACTIVE_INTERVAL_SECONDS)
+        else:
+            time_module.sleep(_SCHEDULER_IDLE_POLL_SECONDS)
+
+
 # ── メッセージ判定・処理 ───────────────────────────────────────────────────────
 
 
@@ -114,6 +195,10 @@ def _handle_text_message(text: str, reply_token: str) -> None:
     if not _is_watch_command(text):
         return  # 監視コマンド以外は無視
 
+    if not is_trading_day():
+        _reply(reply_token, "本日は取引日ではありません。")
+        return  # 取引日でない場合は watchlist 登録・監視起動を行わない
+
     codes = parse_watch_codes(text)
 
     if not codes:
@@ -138,13 +223,22 @@ def _handle_text_message(text: str, reply_token: str) -> None:
     # watchlist に登録
     register_watchlist(valid_codes, source="LINE")
 
+    # 取引時間内であれば5分足監視をバックグラウンドで即時起動する
+    # （Webhookの応答はこの完了を待たない。取引時間外は次回の定期実行まで待つ）
+    market_open = is_market_open_now()
+    if market_open:
+        _trigger_intraday_monitoring(valid_codes)
+
     # 正常返信
     lines = ["監視対象を登録しました。"]
     for code in valid_codes:
         name = company_names.get(code, "")
         lines.append(f"{code} {name}".strip())
     lines.append("")
-    lines.append("次回の5分足監視から対象になります。")
+    if market_open:
+        lines.append("取引時間中のため、5分足監視をバックグラウンドで開始しました。")
+    else:
+        lines.append("取引時間外のため監視待機中です。取引時間（09:00〜15:30）になると自動的に監視を開始します。")
 
     if invalid_codes:
         lines.append("")
@@ -198,6 +292,8 @@ if __name__ == "__main__":
             "誰でも watchlist 登録APIを呼べてしまうため起動を中止します。"
             "意図的に無署名で起動する場合は環境変数 ALLOW_INSECURE_WEBHOOK=1 を設定してください。"
         )
+
+    threading.Thread(target=_run_scheduler_loop, daemon=True).start()
 
     port = int(os.getenv("WEBHOOK_PORT", "5000"))
     logger.info("LINE Webhook サーバー起動 (port=%d)", port)

@@ -20,7 +20,7 @@ import plotly.graph_objects as go
 import streamlit as st
 import yaml
 
-from config import DB_PATH, SETTINGS_PATH
+from config import DB_PATH, SETTINGS_PATH, get_market_status
 
 BASE_DIR = Path(__file__).parent
 
@@ -125,6 +125,15 @@ if auto_refresh:
 # ── メイン画面: 操作ボタン ────────────────────────────────────
 
 st.title("stock_ai 操作パネル")
+
+_MARKET_STATUS_LABELS = {
+    "CLOSED_DAY": ("warning", "本日は取引日ではありません（土日・祝日）。監視は自動実行されません。"),
+    "WAITING":    ("info", "監視待機中（取引時間前）。09:00になると自動的に5分足監視を開始します（line_webhook.py起動中の場合）。"),
+    "OPEN":       ("success", "取引時間内です。5分おきに自動的に5分足監視が実行されます（line_webhook.py起動中の場合）。"),
+    "ENDED":      ("info", "本日の取引時間は終了しました（15:30以降）。"),
+}
+_status_kind, _status_text = _MARKET_STATUS_LABELS[get_market_status()]
+getattr(st, _status_kind)(_status_text)
 
 preview_codes, preview_source = get_intraday_target_preview(codes_list)
 st.subheader("監視対象（5分足監視実行の対象、main.pyと同じ優先順位で判定）")

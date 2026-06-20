@@ -137,22 +137,69 @@ MONITORING_TIME_LIMIT = _parse_hhmm(_SETTINGS["monitoring"]["time_limit"])
 DUPLICATE_SUPPRESS_WINDOW_MINUTES = _SETTINGS["notification"]["duplicate_suppress_window_minutes"]
 
 
+def _is_closed_date(d) -> bool:
+    """土日・日本の祝日（jpholiday未インストール時は土日のみ）なら True を返す"""
+    try:
+        import jpholiday
+        return d.weekday() >= 5 or jpholiday.is_holiday(d)
+    except ImportError:
+        return d.weekday() >= 5
+
+
 def last_business_day() -> str:
     """土日・日本の祝日を除いた直近営業日を YYYY-MM-DD で返す"""
     from datetime import date, timedelta
 
-    try:
-        import jpholiday
-        def _is_closed(d: date) -> bool:
-            return d.weekday() >= 5 or jpholiday.is_holiday(d)
-    except ImportError:
-        def _is_closed(d: date) -> bool:
-            return d.weekday() >= 5  # jpholiday 未インストール時は土日のみ
-
     d = date.today() - timedelta(days=1)  # 当日データは通常未確定なので前日から開始
-    while _is_closed(d):
+    while _is_closed_date(d):
         d -= timedelta(days=1)
     return str(d)
+
+
+# 日本株の通常取引時間（前場・後場、昼休みは無視した大枠の判定用）。
+# LINE Webhook受信時に5分足監視をその場で起動するかどうかの判定にのみ使う
+# （デイトレ判定ロジック自体の OPENING_RANGE / MONITORING_TIME_LIMIT とは無関係）。
+MARKET_OPEN_TIME = _time(9, 0)
+MARKET_CLOSE_TIME = _time(15, 30)
+
+
+def is_market_open_now() -> bool:
+    """現在が日本株の取引時間内（平日・祝日を除く 09:00〜15:30）かどうかを返す"""
+    from datetime import datetime
+
+    now = datetime.now()
+    if _is_closed_date(now.date()):
+        return False
+    return MARKET_OPEN_TIME <= now.time() <= MARKET_CLOSE_TIME
+
+
+def is_trading_day(d=None) -> bool:
+    """指定日（省略時は本日）が取引日（平日・日本の祝日を除く）かどうかを返す"""
+    from datetime import date as _date
+
+    return not _is_closed_date(d or _date.today())
+
+
+def get_market_status() -> str:
+    """
+    現在の取引状態を返す（GUI表示・LINE Webhookの応答分岐に使う）。
+
+    - "CLOSED_DAY": 本日は取引日ではない（土日・祝日）
+    - "WAITING":    取引日だが取引時間前（09:00より前）
+    - "OPEN":       取引時間内（09:00〜15:30）
+    - "ENDED":      取引日で本日の取引時間は終了済み（15:30より後）
+    """
+    from datetime import datetime
+
+    now = datetime.now()
+    if _is_closed_date(now.date()):
+        return "CLOSED_DAY"
+    t = now.time()
+    if t < MARKET_OPEN_TIME:
+        return "WAITING"
+    if t > MARKET_CLOSE_TIME:
+        return "ENDED"
+    return "OPEN"
 
 # yfinance で取得する市場指数・為替
 MARKET_SYMBOLS = {
