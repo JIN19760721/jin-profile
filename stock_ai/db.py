@@ -755,10 +755,17 @@ def upsert_watchlist_entries(rows: list[dict]) -> None:
     logger.info("watchlist 登録: %d 件", len(data))
 
 
+_MAX_ACTIVE_WATCHLIST = 5
+
+
 def get_active_watchlist() -> list[dict]:
-    """is_active=1 の銘柄一覧を返す"""
+    """is_active=1 の銘柄一覧を最大 _MAX_ACTIVE_WATCHLIST（5）件まで返す
+    （register_watchlist() 側で書き込み時にも5件に制限しているが、ここでも
+    読み取り時に防御的に制限する）"""
     with get_conn() as conn:
         cursor = conn.execute(
-            "SELECT code, company_name, selected_date, source FROM watchlist WHERE is_active = 1 ORDER BY rowid"
+            "SELECT code, company_name, selected_date, source FROM watchlist "
+            "WHERE is_active = 1 ORDER BY rowid LIMIT ?",
+            (_MAX_ACTIVE_WATCHLIST,),
         )
         return [dict(row) for row in cursor.fetchall()]

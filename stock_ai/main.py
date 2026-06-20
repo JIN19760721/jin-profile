@@ -393,6 +393,26 @@ def run_daily_report_mode(args, logger):
     logger.info("=" * 60)
 
 
+def run_clear_watchlist_mode(logger):
+    """
+    watchlist の全エントリーを is_active=0 にして監視対象をクリアする
+    （UPDATE watchlist SET is_active = 0）。register_watchlist() による
+    自動登録（RANKING等）で active 件数が想定外に増えた場合の一時対応。
+    """
+    logger.info("=" * 60)
+    logger.info("watchlist クリア開始")
+    logger.info("=" * 60)
+
+    from db import deactivate_watchlist, init_db
+    init_db()
+    deactivate_watchlist()
+
+    logger.info("watchlist の全エントリーを is_active=0 にしました。")
+    logger.info("=" * 60)
+    logger.info("処理完了")
+    logger.info("=" * 60)
+
+
 def run_validate_ranking_mode(args, logger):
     """
     指定日の注目銘柄ランキング（analysis_results）について、翌営業日の株価推移を
@@ -493,12 +513,18 @@ def main():
                         help="--notify-ranking で通知するランキングの件数（省略時は抽出された全銘柄を通知、指定時は最大20件）")
     parser.add_argument("--validate-ranking", action="store_true",
                          help="--date で指定した日の注目銘柄ランキングが翌営業日に有効だったか検証する（--date必須）")
+    parser.add_argument("--clear-watchlist", action="store_true",
+                         help="watchlist の全エントリーを is_active=0 にして監視対象をクリアする")
     args = parser.parse_args()
 
     # ログ用の日付（分析前なので暫定で today を使用）
     from datetime import date as _date
     setup_logging(str(_date.today()))
     logger = logging.getLogger("main")
+
+    if args.clear_watchlist:
+        run_clear_watchlist_mode(logger)
+        return
 
     if args.validate_ranking:
         run_validate_ranking_mode(args, logger)

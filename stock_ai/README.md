@@ -98,7 +98,7 @@ streamlit run app.py
 
 ### 画面でできること
 
-- サイドバー: 監視銘柄コード入力、entry_mode 選択、ランキング通知件数、自動更新ON/OFF・間隔
+- サイドバー: 監視銘柄コード入力、entry_mode 選択、ランキング通知件数（チェックなしなら抽出された全銘柄を通知。CLIの`--ranking-top`省略時と同じ動作）、自動更新ON/OFF・間隔
 - 操作ボタン: ランキング作成 / ランキングをLINE通知 / 5分足監視実行 / 日次レポート作成 / バックテスト実行 / watchlist登録
 - 表示タブ: 最新ランキング、watchlist、5分足データ＋チャート（終値・VWAP・entry_price・atr_stop_price）、デイトレ判定一覧、BUY/WAIT/SELL（DBの`final_action`をそのまま表示。GUI側での再判定は行わない）、日次レポート、settings.yaml の主要設定
 
@@ -193,9 +193,12 @@ watch 7203 3778
 - 4桁数字のみ抽出（重複除外）
 - 最大5銘柄。超過時はエラー返信
 - 本日の注目銘柄ランキングに含まれる銘柄のみ登録可能（ランキング外は登録せず返信）
-- `python main.py` 実行時にデフォルトで抽出された全銘柄が watchlist に登録されるため、
-  Webhook 経由の手動登録はその日のうちに次回の `main.py` 実行で上書きされます
-- 登録すると既存の watchlist は全て置き換わる
+- `python main.py` 実行時に抽出された注目銘柄が watchlist に自動登録されますが、
+  watchlist の active（is_active=1）は常に最大5件に制限されます（`register_watchlist()`
+  が書き込み時に先頭5件へ切り捨て、`get_active_watchlist()` も読み取り時に5件まで
+  制限する二重のガードがあります）。Webhook 経由の手動登録はその日のうちに次回の
+  `main.py` 実行で上書きされます
+- 登録すると既存の watchlist は全て無効化（is_active=0）されてから新規登録される
 
 ### LINE 返信例
 
@@ -266,6 +269,19 @@ python main.py --intraday --codes 7203 3778 --entry-mode manual
 > Webhook の署名検証を有効にしてください。未設定時は検証をスキップするため、
 > 第三者からのリクエストを受け入れてしまいます。
 
+### watchlist をクリアする
+
+watchlist の active 件数が想定外に増えた場合や、監視対象をいったん空にしたい場合は
+以下のコマンドで全エントリーを無効化（`is_active=0`）できます。
+
+```bash
+python main.py --clear-watchlist
+```
+
+実行すると `UPDATE watchlist SET is_active = 0` が行われ、`get_active_watchlist()` は
+空リストを返すようになります。次回の `--intraday` 実行時は watchlist が空のため、
+注目銘柄ランキング上位5件への自動フォールバックが使われます（後述）。
+
 ---
 
 ## 5分足デイトレ判定（イントラデイ監視）
@@ -296,6 +312,22 @@ python main.py --intraday --codes 7203 3778 --entry-mode manual --notify-line
   `excel/intraday_prices_YYYY-MM-DD_HHMM.xlsx`
   （5分足データ・損益計算・デイトレ判定・シグナル変化履歴・買い候補変化履歴・
   売買判断変化履歴の各シート）に出力されます
+
+### 監視対象の選定優先順位
+
+`--intraday` の対象銘柄は以下の優先順位で決まります（`main.py` の `run_intraday_mode()`）。
+
+1. `--codes` が指定されていればそれを使う
+2. 未指定なら watchlist（`is_active=1`、最大5件）を使う
+3. watchlist も空なら、注目銘柄ランキング（`analysis_results`）の `rank` 昇順で上位5件を使う（`watchlist.get_top_ranked_codes(limit=5)`）
+4. それも取得できなければ（ランキングデータなし）エラー終了する
+
+**3のランキングフォールバックは一時的な対象選定のみで、watchlist には保存されません**
+（`get_top_ranked_codes()` は読み取り専用で、その回の `--intraday` 実行が終われば消えます）。
+watchlist に永続登録されるのは、LINE Webhook 経由の手動登録（`source=LINE`）と
+`python main.py` 実行後の自動登録（`source=RANKING`、抽出された注目銘柄。ただし
+active は常に最大5件に制限）だけです。Streamlit GUI（`app.py`）の「5分足監視実行」
+ボタンも内部的に同じ `main.py --intraday` を呼ぶため、この優先順位がそのまま適用されます。
 
 ### signal / entry_candidate / final_action の違い
 

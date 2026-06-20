@@ -100,9 +100,18 @@ def validate_codes_in_latest_ranking(codes: list[str]) -> dict:
 def register_watchlist(codes: list[str], source: str = "LINE") -> list[dict]:
     """
     既存のアクティブ監視銘柄を全て無効化し、指定銘柄を is_active=1 で登録する。
+    最大 _MAX_WATCH_CODES（5）件を超える場合は先頭から切り捨てる
+    （--intraday の対象は最大5件のため、watchlist もそれに合わせる）。
     登録した銘柄の dict リストを返す。
     """
     from db import deactivate_watchlist, upsert_watchlist_entries
+
+    if len(codes) > _MAX_WATCH_CODES:
+        logger.warning(
+            "watchlist登録: %d 件指定されましたが、最大 %d 件までに制限します（切り捨て: %s）",
+            len(codes), _MAX_WATCH_CODES, codes[_MAX_WATCH_CODES:],
+        )
+        codes = codes[:_MAX_WATCH_CODES]
 
     result = validate_codes_in_latest_ranking(codes)
     company_names = result["company_names"]

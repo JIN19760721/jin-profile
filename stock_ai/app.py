@@ -100,7 +100,11 @@ st.sidebar.header("設定")
 
 codes_input = st.sidebar.text_input("監視銘柄コード（4桁・スペース区切り、最大5件）", value="", placeholder="例: 3237 7203 3778")
 entry_mode = st.sidebar.selectbox("entry_mode", ["first_close", "manual"], index=0)
-ranking_top_n = st.sidebar.number_input("ランキング通知件数", min_value=1, max_value=20, value=10, step=1)
+limit_ranking_notify = st.sidebar.checkbox("ランキング通知の件数を指定する（チェックなしは抽出された全銘柄を通知）", value=False)
+ranking_top_n = st.sidebar.number_input(
+    "ランキング通知件数（上記チェック時のみ有効、最大20）",
+    min_value=1, max_value=20, value=10, step=1, disabled=not limit_ranking_notify,
+)
 notify_line_on_monitor = st.sidebar.checkbox("監視実行時にLINE通知する（--notify-line）", value=False)
 skip_fetch = st.sidebar.checkbox("ランキング作成時にデータ取得をスキップ（--skip-fetch）", value=False)
 
@@ -145,8 +149,9 @@ with col1:
 with col2:
     if st.button("ランキングをLINE通知", use_container_width=True):
         from ranking_notifier import notify_ranking
+        top_n = int(ranking_top_n) if limit_ranking_notify else None
         with st.spinner("LINE通知中..."):
-            ok = notify_ranking(int(ranking_top_n))
+            ok = notify_ranking(top_n)
         if ok:
             st.success("LINE通知を送信しました")
         else:
@@ -218,7 +223,7 @@ with tabs[0]:
 # --- watchlist ---
 with tabs[1]:
     from watchlist import get_active_watchlist
-    watch_rows = get_active_watchlist()
+    watch_rows = get_active_watchlist()[:5]  # watchlist は最大5件（db.get_active_watchlist側でも制限済み）
     if not watch_rows:
         st.info("監視中の銘柄がありません。")
     else:
