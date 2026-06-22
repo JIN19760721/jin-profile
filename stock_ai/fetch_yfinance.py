@@ -123,8 +123,8 @@ def _parse_download_df(df: pd.DataFrame, tickers: list[str], codes: list[str]) -
     DB の daily_quotes スキーマに合う辞書リストに変換する。
     """
     results: list[dict] = []
-    # tickers が1件の場合、yf.download は列がMultiIndexにならず単純な列名になるため、
-    # 通常のMultiIndex判定（"Close", ticker）が常にFalseになりサイレントに全件スキップされる。
+    # tickers が1件の場合、yf.download は列がMultiIndexにならず単純な列名になる。
+    # その場合は is_multiindex=False の分岐（elif "Close" not in df.columns）で判定する。
     is_multiindex = isinstance(df.columns, pd.MultiIndex)
 
     for ticker, code in zip(tickers, codes):
