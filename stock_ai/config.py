@@ -212,8 +212,8 @@ MARKET_SYMBOLS = {
 }
 
 # 分析フィルター条件
-MIN_PRICE = 50            # 最低終値（円）
-MAX_PRICE = 3000          # 最高終値（円）
+MIN_PRICE = 10            # 最低終値（円）
+MAX_PRICE = 200000        # 最高終値（円）
 MIN_PRICE_CHANGE_PCT = 3.0  # 最低前日比（%）
 MIN_VOLUME_RATIO = 2.0    # 出来高/5日平均の最低倍率
 MIN_TURNOVER = 50_000_000   # 最低売買代金（5000万円）
