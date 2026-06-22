@@ -3,6 +3,7 @@ yfinance を使って日本株の株価と市場指数を取得する。
 """
 
 import logging
+import re
 import time
 from datetime import date, timedelta
 
@@ -16,6 +17,8 @@ logger = logging.getLogger(__name__)
 _BATCH_SIZE = 200       # レート制限対策で小さめに
 _BATCH_DELAY = 5        # バッチ間の待機秒数
 _RATE_LIMIT_WAIT = 60   # レート制限時の待機秒数
+
+_ALNUM_CODE_RE = re.compile(r"^[0-9A-Za-z]{4}$")
 
 
 # ── 日本株一括取得 ────────────────────────────────────────────
@@ -63,13 +66,13 @@ def fetch_japanese_stocks_from_yfinance(codes: list[str], period: str = "30d") -
 def _to_yfinance_ticker(code: str) -> str | None:
     """
     J-Quants コードを yfinance ティッカーに変換する。
-    - 5桁で末尾0・全数字: "XXXXX0" → "XXXX.T"
-    - 4桁・全数字:          "XXXX"   → "XXXX.T"
-    - その他（英字混じり等）: None（スキップ）
+    - 5桁で末尾0・全数字:        "XXXXX0" → "XXXX.T"
+    - 4桁・全数字、または英字を含む新形式4桁: "XXXX"   → "XXXX.T"
+    - その他: None（スキップ）
     """
     if len(code) == 5 and code.endswith("0") and code[:4].isdigit():
         return f"{code[:4]}.T"
-    if len(code) == 4 and code.isdigit():
+    if _ALNUM_CODE_RE.match(code):
         return f"{code}.T"
     return None
 

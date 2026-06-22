@@ -60,7 +60,8 @@ app = Flask(__name__)
 
 LINE_REPLY_URL = "https://api.line.me/v2/bot/message/reply"
 _MAX_CODES = 5
-_CODES_ONLY_RE = re.compile(r"^[\d\s,、，　]+$")
+_CODES_ONLY_RE = re.compile(r"^[0-9A-Za-z\s,、，　]+$")
+_CODE_PATTERN_RE = re.compile(r"\b[0-9A-Za-z]{4}\b")
 
 
 # ── 署名検証 ──────────────────────────────────────────────────────────────────
@@ -187,13 +188,15 @@ def _is_watch_command(text: str) -> bool:
         watch 7203 3778
         7203 3778
         7203,3778
+
+    銘柄コードは数字4桁、またはアルファベットを含む新形式4桁にも対応する。
     """
     t = text.strip()
     lower = t.lower()
     if lower.startswith("監視") or lower.startswith("watch"):
         return True
-    # プレフィックスなし: 数字・スペース・カンマのみで 4桁コードを含む場合
-    return bool(_CODES_ONLY_RE.match(t) and re.search(r"\d{4}", t))
+    # プレフィックスなし: 英数字・スペース・カンマのみで 4桁コードを含む場合
+    return bool(_CODES_ONLY_RE.match(t) and _CODE_PATTERN_RE.search(t))
 
 
 def _handle_text_message(text: str, reply_token: str) -> None:

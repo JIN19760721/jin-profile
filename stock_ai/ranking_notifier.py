@@ -22,7 +22,7 @@ _MAX_TOP_N = 20
 def _format_code(code) -> str:
     """5桁コード（末尾0）を4桁表示に変換する"""
     s = str(code)
-    if len(s) == 5 and s.endswith("0"):
+    if len(s) == 5 and s.isdigit() and s.endswith("0"):
         return s[:-1]
     return s
 

@@ -507,7 +507,7 @@ def main():
         "--intraday", action="store_true", help="5分足モニタリングモードで実行（注目銘柄抽出は行わない）"
     )
     parser.add_argument(
-        "--codes", nargs="+", help="--intraday 時の対象銘柄コード（最大5件、4桁数字、例: 7203 3778 5253）"
+        "--codes", nargs="+", help="--intraday 時の対象銘柄コード（最大5件、4桁の英数字、例: 7203 3778 5253）"
     )
     parser.add_argument("--entry-mode", choices=["first_close", "manual"], default="first_close",
                          help="エントリー価格の決定方法 (デフォルト: first_close)")
@@ -516,11 +516,11 @@ def main():
     )
     parser.add_argument(
         "--stop-codes", nargs="+",
-        help="指定銘柄の監視を手動で終了する（4桁数字。--intraday と併用、他のオプションは無視される）",
+        help="指定銘柄の監視を手動で終了する（4桁の英数字。--intraday と併用、他のオプションは無視される）",
     )
     parser.add_argument(
         "--resume-codes", nargs="+",
-        help="監視終了済みの指定銘柄を再開する（4桁数字。--intraday と併用、他のオプションは無視される）",
+        help="監視終了済みの指定銘柄を再開する（4桁の英数字。--intraday と併用、他のオプションは無視される）",
     )
     parser.add_argument(
         "--daily-report", action="store_true",

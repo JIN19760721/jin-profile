@@ -15,14 +15,14 @@ from config import DB_PATH
 logger = logging.getLogger(__name__)
 
 _MAX_WATCH_CODES = 5
-_CODE_RE = re.compile(r"\b\d{4}\b")
+_CODE_RE = re.compile(r"\b[0-9A-Za-z]{4}\b")
 _WATCH_PREFIX_RE = re.compile(r"^(監視|watch)\s*", re.IGNORECASE)
 
 
 def parse_watch_codes(text: str) -> list[str]:
     """
-    テキストから4桁銘柄コードを抽出して返す（重複除外・入力順を維持）。
-    "監視" / "watch" プレフィックスは除去してから抽出する。
+    テキストから4桁銘柄コード（数字のみ、または英字を含む新形式）を抽出して返す
+    （重複除外・入力順を維持）。"監視" / "watch" プレフィックスは除去してから抽出する。
     最大件数チェックは呼び出し元で行う。
     """
     cleaned = _WATCH_PREFIX_RE.sub("", text.strip())
@@ -30,9 +30,10 @@ def parse_watch_codes(text: str) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
     for c in found:
-        if c not in seen:
-            seen.add(c)
-            result.append(c)
+        code = c.upper()
+        if code not in seen:
+            seen.add(code)
+            result.append(code)
     return result
 
 
@@ -72,7 +73,7 @@ def validate_codes_in_latest_ranking(codes: list[str]) -> dict:
             name = r["company_name"] or ""
             ranking_map[db_code] = name
             # 5桁コード（末尾0）なら4桁キーも登録
-            if len(db_code) == 5 and db_code.endswith("0"):
+            if len(db_code) == 5 and db_code.isdigit() and db_code.endswith("0"):
                 ranking_map[db_code[:-1]] = name
 
         valid: list[str] = []
