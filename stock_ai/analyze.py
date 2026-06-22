@@ -22,6 +22,7 @@ from config import (
     MIN_TURNOVER,
     MIN_VOLUME_RATIO,
 )
+from fundamental_score import compute_fundamental_score
 
 logger = logging.getLogger(__name__)
 
@@ -51,29 +52,6 @@ def _load_recent_quotes(target_date: str) -> pd.DataFrame:
     )
     conn.close()
     return df
-
-
-def _load_earnings_cache() -> dict:
-    """最新決算データを {code: dict} で返す。テーブルが空なら空 dict。"""
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        df = pd.read_sql_query(
-            """
-            SELECT e.*
-            FROM earnings_data e
-            INNER JOIN (
-                SELECT code, MAX(fiscal_period) AS fp
-                FROM earnings_data
-                GROUP BY code
-            ) latest ON e.code = latest.code AND e.fiscal_period = latest.fp
-            """,
-            conn,
-        )
-        return {row["code"]: row.to_dict() for _, row in df.iterrows()}
-    except Exception:
-        return {}
-    finally:
-        conn.close()
 
 
 def _load_fundamental_cache() -> dict:
@@ -248,25 +226,13 @@ def _score_volume_flow(row: dict) -> float:
     return min(score, 35.0)
 
 
-def _score_earnings(code: str, cache: dict) -> tuple[float, str]:
-    """決算モメンタムスコア（最大20点）。データなし時は (0, 'no_data')"""
-    data = cache.get(code)
-    if not data:
-        return 0.0, "no_data"
-
-    score = 0.0
-    if (data.get("sales_growth_pct") or 0) >= 10:
-        score += 5
-    if (data.get("operating_profit_growth_pct") or 0) >= 20:
-        score += 5
-    if (data.get("eps_growth_pct") or 0) >= 20:
-        score += 5
-    if (data.get("progress_rate_pct") or 0) >= 75:
-        score += 3
-    if data.get("upward_revision_flag"):
-        score += 7
-
-    return min(score, 20.0), "available"
+def _score_earnings(code: str) -> dict:
+    """
+    決算モメンタムスコア（最大90点、EDINET由来）を算出する。
+    取得・解析に失敗した場合は fundamental_score.compute_fundamental_score() 側で
+    必ず score=0 の辞書が返るため、ここで例外を捕捉する必要はない。
+    """
+    return compute_fundamental_score(code)
 
 
 def _score_fundamental(code: str, cache: dict) -> tuple[float, str]:
@@ -367,11 +333,7 @@ def run_analysis(target_date: str | None = None) -> pd.DataFrame:
         return pd.DataFrame()
     logger.info("ロード完了: %d 行", len(df_raw))
 
-    earnings_cache    = _load_earnings_cache()
     fundamental_cache = _load_fundamental_cache()
-
-    if not earnings_cache:
-        logger.info("決算データなし: earnings_momentum_score = 0 点で処理継続")
     if not fundamental_cache:
         logger.info("ファンダメンタルデータなし: fundamental_score = 0 点で処理継続")
 
@@ -382,32 +344,45 @@ def run_analysis(target_date: str | None = None) -> pd.DataFrame:
     if df_feat.empty:
         return pd.DataFrame()
 
-    # 3. スコアリング
+    # 3. テクニカル・出来高スコアリング（全銘柄、外部APIを使わないため低コスト）
     rows = df_feat.to_dict("records")
     for row in rows:
-        code = row["code"]
-        ts        = _score_technical(row)
-        vfs       = _score_volume_flow(row)
-        ems, e_st = _score_earnings(code, earnings_cache)
-        fds, f_st = _score_fundamental(code, fundamental_cache)
-        total = round(ts + vfs + ems + fds, 2)
-
-        row.update({
-            "technical_score":         ts,
-            "volume_flow_score":       vfs,
-            "earnings_momentum_score": ems,
-            "fundamental_score":       fds,
-            "total_score":             total,
-            "earnings_data_status":    e_st,
-            "fundamental_data_status": f_st,
-        })
+        row["technical_score"] = _score_technical(row)
+        row["volume_flow_score"] = _score_volume_flow(row)
 
     df_scored = pd.DataFrame(rows)
 
-    # 4. フィルター
+    # 4. フィルター（EDINET決算モメンタムスコアはフィルター後の候補のみに絞って計算し、
+    #    外部APIへのリクエスト数を抑える）
     df_filtered = _apply_filters(df_scored)
+    if df_filtered.empty:
+        logger.info("分析完了: 注目銘柄 0 件")
+        return df_filtered
 
-    # 5. ランキング & 選定理由
+    # 5. 決算モメンタムスコア（EDINET）・ファンダメンタルスコアの付与
+    filtered_rows = df_filtered.to_dict("records")
+    for row in filtered_rows:
+        code = row["code"]
+        earnings_result = _score_earnings(code)
+        fds, f_st = _score_fundamental(code, fundamental_cache)
+        ems = earnings_result["score"]
+        total = round(row["technical_score"] + row["volume_flow_score"] + ems + fds, 2)
+
+        row.update({
+            "earnings_momentum_score": ems,
+            "fundamental_score":       fds,
+            "total_score":             total,
+            "earnings_data_status":    "available" if ems else "no_data",
+            "fundamental_data_status": f_st,
+            "earnings_within_30d":     earnings_result["earnings_within_30d"],
+            "upward_revision":         earnings_result["upward_revision"],
+            "op_profit_growth_50":     earnings_result["op_profit_growth_50"],
+            "dividend_increase":       earnings_result["dividend_increase"],
+        })
+
+    df_filtered = pd.DataFrame(filtered_rows)
+
+    # 6. ランキング & 選定理由
     df_filtered = df_filtered.sort_values("total_score", ascending=False).reset_index(drop=True)
     df_filtered["rank"] = df_filtered.index + 1
     df_filtered["reason"] = df_filtered.apply(lambda r: _make_reason(r.to_dict()), axis=1)

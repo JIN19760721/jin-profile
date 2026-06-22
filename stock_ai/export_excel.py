@@ -165,6 +165,10 @@ def _write_ranking(wb, df: pd.DataFrame):
         "technical_score":         "テクニカルスコア",
         "volume_flow_score":       "出来高・資金流入スコア",
         "earnings_momentum_score": "決算モメンタムスコア",
+        "earnings_within_30d":     "決算発表30日以内",
+        "upward_revision":         "上方修正",
+        "op_profit_growth_50":     "営業利益YoY+50%以上",
+        "dividend_increase":       "増配",
         "fundamental_score":       "ファンダメンタルスコア",
         "total_score":             "総合スコア",
         "reason":                  "選定理由",
@@ -575,6 +579,48 @@ def export_backtest_excel(summary: dict, df_trades: pd.DataFrame, run_dt: str) -
     _write_backtest_trades(wb, df_trades)
 
     out_path = EXCEL_DIR / f"backtest_{run_dt}.xlsx"
+    wb.save(out_path)
+    logger.info("Excel 出力完了: %s", out_path)
+    return out_path
+
+
+def _write_backtest_comparison_summary(wb, comparison: dict):
+    ws = wb.create_sheet("決算モメンタム比較")
+    metrics = [
+        ("total_trades",         "総トレード数"),
+        ("win_rate_pct",         "勝率(%)"),
+        ("avg_profit_pct",       "平均利益率(%)"),
+        ("avg_loss_pct",         "平均損失率(%)"),
+        ("max_drawdown_pct",     "最大ドローダウン(%)"),
+        ("take_profit_rate_pct", "TAKE_PROFIT到達率(%)"),
+        ("stop_loss_rate_pct",   "STOP_LOSS到達率(%)"),
+    ]
+    ws.append(["項目", "決算モメンタムあり", "決算モメンタムなし"])
+    _style_header(ws, _C["report"], 3)
+    with_summary = comparison["with_momentum"]["summary"] or {}
+    without_summary = comparison["without_momentum"]["summary"] or {}
+    for key, label in metrics:
+        ws.append([label, with_summary.get(key), without_summary.get(key)])
+    _auto_width(ws)
+    logger.info("決算モメンタム比較シート出力完了")
+
+
+def export_backtest_comparison_excel(comparison: dict, run_dt: str) -> Path:
+    """
+    決算モメンタムスコア（EDINET）の有無で分けたバックテスト結果を Excel に出力する。
+    comparison は backtest.run_backtest_with_fundamental_comparison() の返値。
+    """
+    import openpyxl
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    _write_backtest_comparison_summary(wb, comparison)
+    _write_backtest_trades(wb, comparison["with_momentum"]["trades"])
+    wb["バックテスト詳細"].title = "決算モメンタムあり詳細"
+    _write_backtest_trades(wb, comparison["without_momentum"]["trades"])
+    wb["バックテスト詳細"].title = "決算モメンタムなし詳細"
+
+    out_path = EXCEL_DIR / f"backtest_fundamental_compare_{run_dt}.xlsx"
     wb.save(out_path)
     logger.info("Excel 出力完了: %s", out_path)
     return out_path

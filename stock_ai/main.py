@@ -466,6 +466,31 @@ def run_backtest_mode(args, logger):
             logger.error("--backtest で --codes を指定する場合は有効な4桁銘柄コードが必要です。")
             sys.exit(1)
 
+    from datetime import datetime
+
+    if args.compare_fundamental:
+        from backtest import run_backtest_with_fundamental_comparison
+        comparison = run_backtest_with_fundamental_comparison(codes)
+        for label, key in (("決算モメンタムあり", "with_momentum"), ("決算モメンタムなし", "without_momentum")):
+            summary = comparison[key]["summary"]
+            if summary is None:
+                logger.warning("%s: バックテスト対象データがありませんでした。", label)
+            else:
+                logger.info(
+                    "%s: 総トレード数=%d 勝率=%s%% 平均利益率=%s%% 平均損失率=%s%% "
+                    "最大ドローダウン=%s%% TAKE_PROFIT到達率=%s%% STOP_LOSS到達率=%s%%",
+                    label, summary["total_trades"], summary["win_rate_pct"], summary["avg_profit_pct"],
+                    summary["avg_loss_pct"], summary["max_drawdown_pct"],
+                    summary["take_profit_rate_pct"], summary["stop_loss_rate_pct"],
+                )
+
+        from export_excel import export_backtest_comparison_excel
+        run_dt = datetime.now().strftime("%Y-%m-%d_%H%M")
+        out_path = export_backtest_comparison_excel(comparison, run_dt)
+        logger.info("決算モメンタム比較バックテスト結果出力先: %s", out_path)
+        logger.info("=" * 60)
+        return
+
     from backtest import run_backtest
     result = run_backtest(codes)
     summary = result["summary"]
@@ -482,8 +507,6 @@ def run_backtest_mode(args, logger):
         summary["avg_loss_pct"], summary["max_drawdown_pct"],
         summary["take_profit_rate_pct"], summary["stop_loss_rate_pct"],
     )
-
-    from datetime import datetime
 
     from export_excel import export_backtest_excel
     run_dt = datetime.now().strftime("%Y-%m-%d_%H%M")
@@ -529,6 +552,10 @@ def main():
     parser.add_argument(
         "--backtest", action="store_true",
         help="過去のintraday_pricesデータで判定ロジックをバックテストする（--codesで対象銘柄を指定可、省略時は全銘柄）",
+    )
+    parser.add_argument(
+        "--compare-fundamental", action="store_true",
+        help="--backtest と併用。決算モメンタムスコア（EDINET）の有無で銘柄を分けて比較する",
     )
     parser.add_argument(
         "--notify-ranking", action="store_true", help="分析完了後に注目銘柄ランキング上位をLINE通知する"

@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import time as _time
 from pathlib import Path
@@ -20,6 +21,15 @@ load_dotenv(BASE_DIR / ".env")
 JQUANTS_API_KEY = os.getenv("JQUANTS_API_KEY", "") or os.getenv("JQUANTS_REFRESH_TOKEN", "")
 
 JQUANTS_BASE_URL = "https://api.jquants.com/v2"
+
+# EDINET API（決算モメンタムスコア算出用、無料）
+# 取得方法: https://disclosure2.edinet-fsa.go.jp/ でAPIキーを発行し .env に設定する。
+# 未設定でもシステムは停止せず、決算モメンタムスコアは0点で処理を継続する。
+EDINET_API_KEY = os.getenv("EDINET_API_KEY", "")
+if not EDINET_API_KEY:
+    logging.getLogger(__name__).warning(
+        "EDINET_API_KEY が未設定です。決算モメンタムスコアは0点で処理を継続します。"
+    )
 
 # LINE Messaging API（デイトレ判定のシグナル変化通知・Webhook用）
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")

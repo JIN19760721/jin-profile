@@ -237,7 +237,14 @@ with tabs[0]:
         st.info("ランキングデータがありません。「注目銘柄ランキング作成」を実行してください。")
     else:
         st.caption(f"対象日: {df_rank.attrs.get('date', '')}")
-        st.dataframe(df_rank, use_container_width=True, hide_index=True)
+        df_rank_display = df_rank.rename(columns={
+            "technical_score":         "テクニカル点",
+            "volume_flow_score":       "出来高点",
+            "earnings_momentum_score": "決算モメンタム点",
+            "fundamental_score":       "ファンダメンタル点",
+            "total_score":             "合計点",
+        })
+        st.dataframe(df_rank_display, use_container_width=True, hide_index=True)
 
 # --- watchlist ---
 with tabs[1]:

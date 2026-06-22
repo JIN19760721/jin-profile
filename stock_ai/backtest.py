@@ -191,3 +191,61 @@ def run_backtest(codes: list[str] | None = None) -> dict:
     )
 
     return {"summary": summary, "trades": df_trades}
+
+
+def _load_fundamental_momentum_codes(target_date: str | None = None) -> tuple[set[str], set[str]]:
+    """
+    analysis_results から決算モメンタムスコア(>0)の有無で銘柄コードを2分する。
+    target_date 未指定時は analysis_results の最新日付を使う。
+    データが無ければ (空集合, 空集合) を返す。
+    """
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        if target_date is None:
+            row = conn.execute("SELECT MAX(date) FROM analysis_results").fetchone()
+            target_date = row[0] if row and row[0] else None
+        if not target_date:
+            return set(), set()
+
+        df = pd.read_sql_query(
+            "SELECT code, earnings_momentum_score FROM analysis_results WHERE date = ?",
+            conn, params=(target_date,),
+        )
+    except Exception as e:
+        logger.warning("決算モメンタムスコアの読み込みに失敗: %s", e)
+        return set(), set()
+    finally:
+        conn.close()
+
+    with_momentum = set(df[df["earnings_momentum_score"].fillna(0) > 0]["code"])
+    without_momentum = set(df[df["earnings_momentum_score"].fillna(0) <= 0]["code"])
+    return with_momentum, without_momentum
+
+
+def run_backtest_with_fundamental_comparison(
+    codes: list[str] | None = None, target_date: str | None = None,
+) -> dict:
+    """
+    決算モメンタムスコア（EDINET）の有無で銘柄を分け、それぞれ個別にバックテストする。
+    analysis_results にデータが無い場合は、両グループとも対象銘柄0件として返す。
+    返値: {"with_momentum": run_backtest()の返値, "without_momentum": run_backtest()の返値}
+    """
+    with_momentum, without_momentum = _load_fundamental_momentum_codes(target_date)
+
+    if codes:
+        with_momentum = with_momentum & set(codes)
+        without_momentum = without_momentum & set(codes)
+
+    if not with_momentum and not without_momentum:
+        logger.warning("決算モメンタムスコアのデータが無いため比較バックテストは実施できません。")
+
+    logger.info(
+        "決算モメンタム比較バックテスト: あり %d 銘柄 / なし %d 銘柄",
+        len(with_momentum), len(without_momentum),
+    )
+
+    empty_result = {"summary": None, "trades": pd.DataFrame()}
+    return {
+        "with_momentum":    run_backtest(sorted(with_momentum)) if with_momentum else empty_result,
+        "without_momentum": run_backtest(sorted(without_momentum)) if without_momentum else empty_result,
+    }

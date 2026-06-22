@@ -241,6 +241,10 @@ _ANALYSIS_NEW_COLS = [
     ("earnings_data_status",     "TEXT"),
     ("fundamental_data_status",  "TEXT"),
     ("reason",                   "TEXT"),
+    ("earnings_within_30d",      "INTEGER"),
+    ("upward_revision",          "INTEGER"),
+    ("op_profit_growth_50",      "INTEGER"),
+    ("dividend_increase",        "INTEGER"),
 ]
 
 # trade_signals に追加するカラム
@@ -404,8 +408,9 @@ def upsert_analysis_results(rows: list[dict]):
          total_score, change_pct, volume_ratio_5d, trading_value, trading_value_ratio_5d,
          volume_ma5, trading_value_ma5,
          ma25, ma5_gap_pct, ma25_gap_pct, high_20d, high_breakout,
-         earnings_data_status, fundamental_data_status, reason)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         earnings_data_status, fundamental_data_status, reason,
+         earnings_within_30d, upward_revision, op_profit_growth_50, dividend_increase)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """
     data = [
         (r["code"], r["date"], r.get("company_name"), r.get("close"),
@@ -420,7 +425,9 @@ def upsert_analysis_results(rows: list[dict]):
          r.get("ma25"), r.get("ma5_gap_pct"), r.get("ma25_gap_pct"),
          r.get("high_20d"), r.get("high_breakout"),
          r.get("earnings_data_status"), r.get("fundamental_data_status"),
-         r.get("reason"))
+         r.get("reason"),
+         r.get("earnings_within_30d"), r.get("upward_revision"),
+         r.get("op_profit_growth_50"), r.get("dividend_increase"))
         for r in rows
     ]
     with get_conn() as conn:
