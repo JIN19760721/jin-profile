@@ -22,8 +22,7 @@ import sys
 
 import pandas as pd
 
-from config import DUPLICATE_SUPPRESS_WINDOW_MINUTES as _DUPLICATE_SUPPRESS_WINDOW_MINUTES
-from config import LOGS_DIR, last_business_day
+from config import DUPLICATE_SUPPRESS_WINDOW_MINUTES as _DUPLICATE_SUPPRESS_WINDOW_MINUTES, LOGS_DIR, last_business_day
 
 _DEFAULT_PERIOD = "30d"
 
@@ -78,8 +77,8 @@ def _fetch_companies_or_fallback(logger) -> list[str]:
     J-Quants から上場銘柄を取得してコードリストを返す。
     403 / 失敗時は既存 DB の listed_companies からコードを取得する。
     """
+    from db import get_all_codes, upsert_companies
     from fetch_jquants import fetch_listed_companies
-    from db import upsert_companies, get_all_codes
 
     try:
         companies = fetch_listed_companies()
@@ -205,8 +204,8 @@ def run_intraday_mode(args, logger):
     from intraday_monitor import fetch_previous_day_ohlc_for_codes
     previous_ohlc = fetch_previous_day_ohlc_for_codes(codes)
 
-    from fetch_yfinance import classify_market_sentiment, fetch_market_snapshot
     from db import upsert_market_indices
+    from fetch_yfinance import classify_market_sentiment, fetch_market_snapshot
     market_snapshot = fetch_market_snapshot()
     if market_snapshot:
         upsert_market_indices([
@@ -350,6 +349,7 @@ def run_intraday_mode(args, logger):
     df_final_action_history = pd.DataFrame(final_action_history_rows)
 
     from datetime import datetime
+
     from export_excel import export_intraday_excel
     run_dt = datetime.now().strftime("%Y-%m-%d_%H%M")
     out_path = export_intraday_excel(
@@ -484,6 +484,7 @@ def run_backtest_mode(args, logger):
     )
 
     from datetime import datetime
+
     from export_excel import export_backtest_excel
     run_dt = datetime.now().strftime("%Y-%m-%d_%H%M")
     out_path = export_backtest_excel(summary, df_trades, run_dt)
@@ -570,8 +571,8 @@ def main():
         # ── Step 3: yfinance で日本株日次株価取得 ────────────
         logger.info("[Step 3] 日本株日次株価取得 (yfinance, period=%s)", args.period)
         try:
-            from fetch_yfinance import fetch_japanese_stocks_from_yfinance
             from db import upsert_daily_quotes
+            from fetch_yfinance import fetch_japanese_stocks_from_yfinance
             jpy_quotes = fetch_japanese_stocks_from_yfinance(codes, period=args.period)
             if jpy_quotes:
                 upsert_daily_quotes(jpy_quotes)
@@ -584,8 +585,8 @@ def main():
         # ── Step 4: yfinance 市場指数取得 ─────────────────────
         logger.info("[Step 4] 市場指数取得 (yfinance)")
         try:
-            from fetch_yfinance import fetch_market_indices
             from db import upsert_market_indices
+            from fetch_yfinance import fetch_market_indices
             indices = fetch_market_indices(days=5)
             if indices:
                 upsert_market_indices(indices)

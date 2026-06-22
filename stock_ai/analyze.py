@@ -15,8 +15,12 @@ from datetime import date, timedelta
 import pandas as pd
 
 from config import (
-    DB_PATH, MIN_PRICE, MAX_PRICE,
-    MIN_PRICE_CHANGE_PCT, MIN_VOLUME_RATIO, MIN_TURNOVER,
+    DB_PATH,
+    MAX_PRICE,
+    MIN_PRICE,
+    MIN_PRICE_CHANGE_PCT,
+    MIN_TURNOVER,
+    MIN_VOLUME_RATIO,
 )
 
 logger = logging.getLogger(__name__)

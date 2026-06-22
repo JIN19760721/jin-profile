@@ -43,7 +43,6 @@ from config import (
     is_trading_day,
 )
 from watchlist import (
-    get_active_watchlist,
     parse_watch_codes,
     register_watchlist,
     validate_codes_in_latest_ranking,

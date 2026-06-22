@@ -21,10 +21,12 @@ import sqlite3
 
 import pandas as pd
 
-from config import ATR_NEAR_PCT as _ATR_NEAR_PCT
-from config import ATR_STOP_MULTIPLIER as _ATR_STOP_MULTIPLIER
-from config import DB_PATH
-from config import VWAP_NEAR_PCT as _VWAP_NEAR_PCT
+from config import (
+    ATR_NEAR_PCT as _ATR_NEAR_PCT,
+    ATR_STOP_MULTIPLIER as _ATR_STOP_MULTIPLIER,
+    DB_PATH,
+    VWAP_NEAR_PCT as _VWAP_NEAR_PCT,
+)
 from monitoring import _TIME_LIMIT
 from trade_decision import (
     _raw_condition,
