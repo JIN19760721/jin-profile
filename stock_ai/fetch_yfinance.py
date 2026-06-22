@@ -66,11 +66,13 @@ def fetch_japanese_stocks_from_yfinance(codes: list[str], period: str = "30d") -
 def _to_yfinance_ticker(code: str) -> str | None:
     """
     J-Quants コードを yfinance ティッカーに変換する。
-    - 5桁で末尾0・全数字:        "XXXXX0" → "XXXX.T"
-    - 4桁・全数字、または英字を含む新形式4桁: "XXXX"   → "XXXX.T"
+    J-Quants は英字を含む新形式コードも含め、全銘柄を5桁（末尾0埋め）で返すため、
+    5桁末尾0のパディングは数字限定にせず判定する。
+    - 5桁で末尾0:  "XXXXX0" → "XXXX.T"（先頭4桁が英数字4桁コードなら変換）
+    - 4桁の英数字: "XXXX"   → "XXXX.T"
     - その他: None（スキップ）
     """
-    if len(code) == 5 and code.endswith("0") and code[:4].isdigit():
+    if len(code) == 5 and code.endswith("0") and _ALNUM_CODE_RE.match(code[:4]):
         return f"{code[:4]}.T"
     if _ALNUM_CODE_RE.match(code):
         return f"{code}.T"

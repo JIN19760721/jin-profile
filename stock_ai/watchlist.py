@@ -73,7 +73,7 @@ def validate_codes_in_latest_ranking(codes: list[str]) -> dict:
             name = r["company_name"] or ""
             ranking_map[db_code] = name
             # 5桁コード（末尾0）なら4桁キーも登録
-            if len(db_code) == 5 and db_code.isdigit() and db_code.endswith("0"):
+            if len(db_code) == 5 and db_code.endswith("0"):
                 ranking_map[db_code[:-1]] = name
 
         valid: list[str] = []

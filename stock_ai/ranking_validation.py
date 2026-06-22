@@ -58,7 +58,7 @@ def get_ranking_for_date(target_date: str) -> pd.DataFrame:
 
 def _get_quote_from_db(code: str, quote_date: str) -> dict | None:
     """daily_quotes から該当日のOHLCVを取得する（4桁/5桁コード両対応）。なければ None"""
-    code_5digit = f"{code}0" if len(code) == 4 and code.isdigit() else code
+    code_5digit = f"{code}0" if len(code) == 4 else code
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.execute(
@@ -95,7 +95,7 @@ def _get_quote_from_yfinance(code: str, quote_date: str) -> dict | None:
 
 def _get_avg_volume(code: str, before_date: str) -> float | None:
     """volume_ratio 算出用に、before_date より前の直近 _AVG_VOLUME_DAYS 日平均出来高を返す"""
-    code_5digit = f"{code}0" if len(code) == 4 and code.isdigit() else code
+    code_5digit = f"{code}0" if len(code) == 4 else code
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query(
         """

@@ -577,7 +577,7 @@ def get_company_name(code: str) -> str | None:
     指定銘柄の会社名を listed_companies から取得する。
     4桁コードもその5桁表記（末尾0）もあわせて検索する。データがなければ None。
     """
-    code_5digit = f"{code}0" if len(code) == 4 and code.isdigit() else code
+    code_5digit = f"{code}0" if len(code) == 4 else code
     with get_conn() as conn:
         cursor = conn.execute(
             "SELECT company_name FROM listed_companies WHERE code IN (?, ?) LIMIT 1",
@@ -653,7 +653,7 @@ def get_latest_rank(code: str) -> int | None:
     4桁コードもその5桁表記もあわせて検索する。日次フロー未実行・ランク外の
     場合はデータがないため None。
     """
-    code_5digit = f"{code}0" if len(code) == 4 and code.isdigit() else code
+    code_5digit = f"{code}0" if len(code) == 4 else code
     with get_conn() as conn:
         cursor = conn.execute(
             """
@@ -695,7 +695,7 @@ def get_previous_daily_quote(code: str) -> dict | None:
     """
     from datetime import date
     today = str(date.today())
-    code_5digit = f"{code}0" if len(code) == 4 and code.isdigit() else code
+    code_5digit = f"{code}0" if len(code) == 4 else code
     with get_conn() as conn:
         cursor = conn.execute(
             """
