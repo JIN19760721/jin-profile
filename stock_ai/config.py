@@ -204,7 +204,7 @@ def get_market_status() -> str:
 # yfinance で取得する市場指数・為替
 MARKET_SYMBOLS = {
     "^N225":    "日経平均",
-    "^TOPX":    "TOPIX",
+    "1306.T":   "TOPIX連動ETF",  # ^TOPX は yfinance で取得不可のため代替シンボルを使用
     "^IXIC":    "NASDAQ",
     "^GSPC":    "S&P500",
     "USDJPY=X": "ドル円",

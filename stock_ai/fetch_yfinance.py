@@ -223,7 +223,7 @@ def get_latest_index_summary() -> dict:
 # ── 市場環境（地合い）判定 ────────────────────────────────────
 
 # 地合い判定に使う指数（USDJPY=X, BTC-USD は market_indices への保存のみ行い、判定には使わない）
-_SENTIMENT_SYMBOLS = ["^N225", "^TOPX", "^IXIC", "^GSPC"]
+_SENTIMENT_SYMBOLS = ["^N225", "1306.T", "^IXIC", "^GSPC"]
 _SENTIMENT_STRONG_PCT = 1.0
 _SENTIMENT_WEAK_PCT = -1.0
 

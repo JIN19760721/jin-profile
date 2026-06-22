@@ -7,15 +7,40 @@ LINE通知も行わない。
 """
 
 import logging
-from datetime import datetime
+import time as time_module
+from datetime import datetime, time as dtime
 
 import pandas as pd
 import yfinance as yf
 
+from config import MARKET_OPEN_TIME
+
 logger = logging.getLogger(__name__)
+_yf_logger = logging.getLogger("yfinance")
 
 _INTERVAL = "5m"
 _PERIOD = "1d"
+
+# 取引開始直後はYahoo Finance側に当日の5分足がまだ反映されていないことがあるため、
+# この時間帯の空データはエラーではなく軽い扱いとし、短いリトライを行う。
+_EARLY_SESSION_END_TIME = dtime(9, 15)
+_EARLY_SESSION_RETRY_COUNT = 2
+_EARLY_SESSION_RETRY_DELAY_SECONDS = 3
+
+
+def _is_early_session(now: datetime | None = None) -> bool:
+    now = now or datetime.now()
+    return MARKET_OPEN_TIME <= now.time() < _EARLY_SESSION_END_TIME
+
+
+def _fetch_history_quiet(ticker_symbol: str) -> pd.DataFrame:
+    """取引開始直後用: yfinance内部の「possibly delisted」ログを一時的に抑制して取得する"""
+    prev_level = _yf_logger.level
+    _yf_logger.setLevel(logging.CRITICAL)
+    try:
+        return yf.Ticker(ticker_symbol).history(period=_PERIOD, interval=_INTERVAL)
+    finally:
+        _yf_logger.setLevel(prev_level)
 
 
 def code_to_ticker(code: str) -> str:
@@ -32,17 +57,34 @@ def fetch_intraday_prices(codes: list[str]) -> dict[str, list[dict]]:
     他の銘柄の処理は継続する。
     """
     result: dict[str, list[dict]] = {}
+    early_session = _is_early_session()
 
     for code in codes:
         ticker_symbol = code_to_ticker(code)
         try:
-            hist = yf.Ticker(ticker_symbol).history(period=_PERIOD, interval=_INTERVAL)
+            if early_session:
+                hist = _fetch_history_quiet(ticker_symbol)
+            else:
+                hist = yf.Ticker(ticker_symbol).history(period=_PERIOD, interval=_INTERVAL)
         except Exception as e:
             logger.error("銘柄 %s: 5分足取得失敗: %s", code, e)
             continue
 
+        if hist.empty and early_session:
+            for _ in range(_EARLY_SESSION_RETRY_COUNT):
+                time_module.sleep(_EARLY_SESSION_RETRY_DELAY_SECONDS)
+                try:
+                    hist = _fetch_history_quiet(ticker_symbol)
+                except Exception:
+                    hist = pd.DataFrame()
+                if not hist.empty:
+                    break
+
         if hist.empty:
-            logger.warning("銘柄 %s: 5分足データがありません。スキップ", code)
+            if early_session:
+                logger.info("銘柄 %s: 取引開始直後のため5分足未反映の可能性。スキップ", code)
+            else:
+                logger.warning("銘柄 %s: 5分足データがありません。スキップ", code)
             continue
 
         records = []
