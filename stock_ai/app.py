@@ -98,9 +98,13 @@ def get_intraday_target_preview(manual_codes: list[str]) -> tuple[list[str], str
 
 st.sidebar.header("設定")
 
-codes_input = st.sidebar.text_input("監視銘柄コード（4桁・スペース区切り、最大5件）", value="", placeholder="例: 3237 7203 3778")
+codes_input = st.sidebar.text_input(
+    "監視銘柄コード（4桁・スペース区切り、最大5件）", value="", placeholder="例: 3237 7203 3778"
+)
 entry_mode = st.sidebar.selectbox("entry_mode", ["first_close", "manual"], index=0)
-limit_ranking_notify = st.sidebar.checkbox("ランキング通知の件数を指定する（チェックなしは抽出された全銘柄を通知）", value=False)
+limit_ranking_notify = st.sidebar.checkbox(
+    "ランキング通知の件数を指定する（チェックなしは抽出された全銘柄を通知）", value=False
+)
 ranking_top_n = st.sidebar.number_input(
     "ランキング通知件数（上記チェック時のみ有効、最大20）",
     min_value=1, max_value=20, value=10, step=1, disabled=not limit_ranking_notify,
@@ -128,9 +132,15 @@ st.title("stock_ai 操作パネル")
 
 _MARKET_STATUS_LABELS = {
     "CLOSED_DAY": ("warning", "本日は取引日ではありません（土日・祝日）。監視は自動実行されません。"),
-    "WAITING":    ("info", "監視待機中（取引時間前）。09:00になると自動的に5分足監視を開始します（line_webhook.py起動中の場合）。"),
-    "OPEN":       ("success", "取引時間内です。5分おきに自動的に5分足監視が実行されます（line_webhook.py起動中の場合）。"),
-    "ENDED":      ("info", "本日の取引時間は終了しました（15:30以降）。"),
+    "WAITING": (
+        "info",
+        "監視待機中（取引時間前）。09:00になると自動的に5分足監視を開始します（line_webhook.py起動中の場合）。",
+    ),
+    "OPEN": (
+        "success",
+        "取引時間内です。5分おきに自動的に5分足監視が実行されます（line_webhook.py起動中の場合）。",
+    ),
+    "ENDED": ("info", "本日の取引時間は終了しました（15:30以降）。"),
 }
 _status_kind, _status_text = _MARKET_STATUS_LABELS[get_market_status()]
 getattr(st, _status_kind)(_status_text)

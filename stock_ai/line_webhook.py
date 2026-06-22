@@ -144,7 +144,11 @@ def _trigger_intraday_monitoring(codes: list[str] | None = None) -> None:
         log_file = open(log_path, "a", encoding="utf-8")
         try:
             _current_proc = subprocess.Popen(cmd, cwd=str(_BASE_DIR), stdout=log_file, stderr=log_file)
-            logger.info("5分足監視をバックグラウンドで起動しました: %s (log=%s)", codes or "(watchlist/ランキング)", log_path)
+            logger.info(
+                "5分足監視をバックグラウンドで起動しました: %s (log=%s)",
+                codes or "(watchlist/ランキング)",
+                log_path,
+            )
         finally:
             log_file.close()
 
@@ -156,7 +160,10 @@ def _run_scheduler_loop() -> None:
     取引時間外・休日は60秒おきに状態を再チェックするだけで監視は実行しない
     （取引開始を遅延なく検知するため、5分間隔より短いポーリングにしている）。
     """
-    logger.info("5分足監視スケジューラを起動しました（取引時間中は%d秒おきに自動実行）", _SCHEDULER_ACTIVE_INTERVAL_SECONDS)
+    logger.info(
+        "5分足監視スケジューラを起動しました（取引時間中は%d秒おきに自動実行）",
+        _SCHEDULER_ACTIVE_INTERVAL_SECONDS,
+    )
     while True:
         if is_market_open_now():
             try:

@@ -117,7 +117,9 @@ def compute_metrics(df_code: pd.DataFrame) -> dict:
         volume_ratio_3_12 = volume_ma3 / volume_ma12
     else:
         volume_ratio_3_12 = None
-    volume_surge_continuation = bool(volume_ratio_3_12 is not None and volume_ratio_3_12 >= _VOLUME_SURGE_CONTINUATION_RATIO)
+    volume_surge_continuation = bool(
+        volume_ratio_3_12 is not None and volume_ratio_3_12 >= _VOLUME_SURGE_CONTINUATION_RATIO
+    )
     volume_fading = bool(volume_ratio_3_12 is not None and volume_ratio_3_12 < _VOLUME_FADING_RATIO)
 
     latest = df_sorted.iloc[-1]
@@ -257,7 +259,11 @@ def decide_signal(
     if breakout_fade or opening_fade:
         if volume_fading:
             return "WATCH", "高値圏で出来高が失速しているため利益確定候補", "NONE"
-        base = "前日高値ブレイク後に失速しているため警戒" if breakout_fade else "寄り付き30分高値ブレイク後に失速しているため警戒"
+        base = (
+            "前日高値ブレイク後に失速しているため警戒"
+            if breakout_fade
+            else "寄り付き30分高値ブレイク後に失速しているため警戒"
+        )
         if profit_pct > 0:
             return "WATCH", f"{base}（利益確定を検討）", "NONE"
         return "WATCH", base, "NONE"
@@ -275,7 +281,11 @@ def decide_signal(
         return "WATCH", "ATR損切りラインに接近しているため警戒", "NONE"
 
     if breakout_prev_high_flag or opening_range_breakout:
-        base = "前日高値を上抜けているため上昇継続" if breakout_prev_high_flag else "寄り付き30分高値を上抜けているため上昇継続"
+        base = (
+            "前日高値を上抜けているため上昇継続"
+            if breakout_prev_high_flag
+            else "寄り付き30分高値を上抜けているため上昇継続"
+        )
         if volume_surge_continuation:
             return "STAY", f"{base}（出来高急増継続のため強い継続材料）", "NONE"
         return "STAY", base, "NONE"

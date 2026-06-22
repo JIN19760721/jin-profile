@@ -282,11 +282,16 @@ def _score_fundamental(code: str, cache: dict) -> tuple[float, str]:
     eq   = data.get("equity_ratio")
     opm  = data.get("operating_margin")
 
-    if per  and 0 < per  <= 15:   score += 4
-    if pbr  and 0 < pbr  <= 1.5:  score += 4
-    if roe  and roe  >= 8:         score += 4
-    if eq   and eq   >= 40:        score += 4
-    if opm  and opm  >= 8:         score += 4
+    if per and 0 < per <= 15:
+        score += 4
+    if pbr and 0 < pbr <= 1.5:
+        score += 4
+    if roe and roe >= 8:
+        score += 4
+    if eq and eq >= 40:
+        score += 4
+    if opm and opm >= 8:
+        score += 4
 
     return min(score, 20.0), "available"
 

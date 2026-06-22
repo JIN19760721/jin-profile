@@ -498,20 +498,45 @@ def run_backtest_mode(args, logger):
 def main():
     parser = argparse.ArgumentParser(description="日本株注目銘柄 自動抽出ツール")
     parser.add_argument("--date",   help="分析対象日 (YYYY-MM-DD, 省略時は取得データの最新日)")
-    parser.add_argument("--period", default=_DEFAULT_PERIOD, help=f"yfinance 取得期間 (例: 30d, 60d, デフォルト: {_DEFAULT_PERIOD})")
+    parser.add_argument(
+        "--period", default=_DEFAULT_PERIOD,
+        help=f"yfinance 取得期間 (例: 30d, 60d, デフォルト: {_DEFAULT_PERIOD})",
+    )
     parser.add_argument("--skip-fetch", action="store_true", help="データ取得をスキップし分析のみ実行")
-    parser.add_argument("--intraday", action="store_true", help="5分足モニタリングモードで実行（注目銘柄抽出は行わない）")
-    parser.add_argument("--codes", nargs="+", help="--intraday 時の対象銘柄コード（最大5件、4桁数字、例: 7203 3778 5253）")
+    parser.add_argument(
+        "--intraday", action="store_true", help="5分足モニタリングモードで実行（注目銘柄抽出は行わない）"
+    )
+    parser.add_argument(
+        "--codes", nargs="+", help="--intraday 時の対象銘柄コード（最大5件、4桁数字、例: 7203 3778 5253）"
+    )
     parser.add_argument("--entry-mode", choices=["first_close", "manual"], default="first_close",
                          help="エントリー価格の決定方法 (デフォルト: first_close)")
-    parser.add_argument("--notify-line", action="store_true", help="シグナル変化時にLINE Notifyで通知する（指定しない場合はログのみ）")
-    parser.add_argument("--stop-codes", nargs="+", help="指定銘柄の監視を手動で終了する（4桁数字。--intraday と併用、他のオプションは無視される）")
-    parser.add_argument("--resume-codes", nargs="+", help="監視終了済みの指定銘柄を再開する（4桁数字。--intraday と併用、他のオプションは無視される）")
-    parser.add_argument("--daily-report", action="store_true", help="取引終了後の日次監視レポートをExcel出力する（--dateで対象日を指定可、省略時は本日）")
-    parser.add_argument("--backtest", action="store_true", help="過去のintraday_pricesデータで判定ロジックをバックテストする（--codesで対象銘柄を指定可、省略時は全銘柄）")
-    parser.add_argument("--notify-ranking", action="store_true", help="分析完了後に注目銘柄ランキング上位をLINE通知する")
-    parser.add_argument("--ranking-top", type=int, default=None, metavar="N",
-                        help="--notify-ranking で通知するランキングの件数（省略時は抽出された全銘柄を通知、指定時は最大20件）")
+    parser.add_argument(
+        "--notify-line", action="store_true", help="シグナル変化時にLINE Notifyで通知する（指定しない場合はログのみ）"
+    )
+    parser.add_argument(
+        "--stop-codes", nargs="+",
+        help="指定銘柄の監視を手動で終了する（4桁数字。--intraday と併用、他のオプションは無視される）",
+    )
+    parser.add_argument(
+        "--resume-codes", nargs="+",
+        help="監視終了済みの指定銘柄を再開する（4桁数字。--intraday と併用、他のオプションは無視される）",
+    )
+    parser.add_argument(
+        "--daily-report", action="store_true",
+        help="取引終了後の日次監視レポートをExcel出力する（--dateで対象日を指定可、省略時は本日）",
+    )
+    parser.add_argument(
+        "--backtest", action="store_true",
+        help="過去のintraday_pricesデータで判定ロジックをバックテストする（--codesで対象銘柄を指定可、省略時は全銘柄）",
+    )
+    parser.add_argument(
+        "--notify-ranking", action="store_true", help="分析完了後に注目銘柄ランキング上位をLINE通知する"
+    )
+    parser.add_argument(
+        "--ranking-top", type=int, default=None, metavar="N",
+        help="--notify-ranking で通知するランキングの件数（省略時は抽出された全銘柄を通知、指定時は最大20件）",
+    )
     parser.add_argument("--validate-ranking", action="store_true",
                          help="--date で指定した日の注目銘柄ランキングが翌営業日に有効だったか検証する（--date必須）")
     parser.add_argument("--clear-watchlist", action="store_true",
@@ -639,7 +664,10 @@ def main():
 
     # ── Step 8: ランキング LINE 通知（--notify-ranking 時のみ。デフォルトで抽出された全銘柄を通知）──
     if args.notify_ranking:
-        logger.info("[Step 8] ランキング LINE 通知 (top_n=%s)", args.ranking_top if args.ranking_top is not None else "全件")
+        logger.info(
+            "[Step 8] ランキング LINE 通知 (top_n=%s)",
+            args.ranking_top if args.ranking_top is not None else "全件",
+        )
         try:
             from ranking_notifier import notify_ranking
             result = notify_ranking(args.ranking_top)
