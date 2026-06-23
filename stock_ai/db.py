@@ -447,6 +447,25 @@ def upsert_analysis_results(rows: list[dict]):
     logger.info("分析結果保存: %d 件", len(data))
 
 
+def upsert_fundamentals(rows: list[dict]):
+    """ファンダメンタル指標（PER/PBR/ROE等）を fundamentals テーブルに保存する"""
+    sql = """
+        INSERT OR REPLACE INTO fundamentals
+        (code, market_cap, per, pbr, roe, equity_ratio, operating_margin,
+         sales, operating_profit, eps, dividend_yield)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    """
+    data = [
+        (r["code"], r.get("market_cap"), r.get("per"), r.get("pbr"), r.get("roe"),
+         r.get("equity_ratio"), r.get("operating_margin"), r.get("sales"),
+         r.get("operating_profit"), r.get("eps"), r.get("dividend_yield"))
+        for r in rows
+    ]
+    with get_conn() as conn:
+        conn.executemany(sql, data)
+    logger.info("ファンダメンタル指標保存: %d 件", len(data))
+
+
 def upsert_intraday_prices(code: str, rows: list[dict]):
     sql = """
         INSERT OR REPLACE INTO intraday_prices

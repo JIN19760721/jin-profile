@@ -249,31 +249,71 @@ def _check_dividend_increase(docs: list[dict], reasons: list[str]) -> bool:
     return False
 
 
+def get_latest_financial_document(code: str) -> dict | None:
+    """
+    指定銘柄の直近の決算書類（有報/四半期/半期報告書、訂正含む）をEDINETの
+    開示書類インデックスから返す。fundamentals_fetcher.py 等から再利用するための
+    公開ヘルパー（_get_doc_index() のキャッシュをそのまま再利用するため、
+    プロセス内で複数銘柄分呼んでもEDINETへのアクセスは増えない）。
+    見つからない・取得失敗時は None。
+    """
+    try:
+        docs = _fetch_recent_documents(code)
+    except Exception:
+        return None
+
+    financial_docs = sorted(
+        (d for d in docs if d.get("docTypeCode") in _DOC_TYPE_FINANCIAL),
+        key=lambda d: d.get("submitDateTime", ""),
+        reverse=True,
+    )
+    return financial_docs[0] if financial_docs else None
+
+
+def download_financial_csv_frames(doc_id: str) -> list[pd.DataFrame]:
+    """
+    指定書類IDのXBRL付随CSV（zip内に複数ファイルある場合あり）を読み込んで
+    DataFrameのリストで返す。取得・解析に失敗した場合は空リストを返す
+    （例外は外に投げない）。
+    """
+    try:
+        resp = requests.get(
+            f"{EDINET_BASE_URL}/documents/{doc_id}",
+            params={"type": 5, "Subscription-Key": EDINET_API_KEY},  # type=5: CSV(XBRL付随データ)
+            timeout=_REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        logger.warning("EDINET CSV取得失敗 (docID=%s): %s", doc_id, e)
+        return []
+
+    frames: list[pd.DataFrame] = []
+    try:
+        with ZipFile(BytesIO(resp.content)) as zf:
+            for name in zf.namelist():
+                if not name.endswith(".csv"):
+                    continue
+                try:
+                    with zf.open(name) as f:
+                        frames.append(pd.read_csv(f, sep="\t", encoding="utf-16"))
+                except Exception:
+                    continue
+    except Exception as e:
+        logger.warning("EDINET CSV展開失敗 (docID=%s): %s", doc_id, e)
+        return []
+    return frames
+
+
 def _fetch_operating_income_yoy(doc: dict) -> float | None:
     """最新決算書類のXBRL付随CSVから営業利益のYoY成長率(%)を算出する。取得・解析失敗時はNone"""
     doc_id = doc.get("docID")
     if not doc_id:
         return None
 
-    resp = requests.get(
-        f"{EDINET_BASE_URL}/documents/{doc_id}",
-        params={"type": 5, "Subscription-Key": EDINET_API_KEY},  # type=5: CSV(XBRL付随データ)
-        timeout=_REQUEST_TIMEOUT,
-    )
-    resp.raise_for_status()
-
-    with ZipFile(BytesIO(resp.content)) as zf:
-        for name in zf.namelist():
-            if not name.endswith(".csv"):
-                continue
-            try:
-                with zf.open(name) as f:
-                    df = pd.read_csv(f, sep="\t", encoding="utf-16")
-            except Exception:
-                continue
-            growth = _extract_operating_income_yoy(df)
-            if growth is not None:
-                return growth
+    for df in download_financial_csv_frames(doc_id):
+        growth = _extract_operating_income_yoy(df)
+        if growth is not None:
+            return growth
     return None
 
 
@@ -282,7 +322,12 @@ def _extract_operating_income_yoy(df: pd.DataFrame) -> float | None:
     if "要素ID" not in df.columns or "値" not in df.columns or "コンテキストID" not in df.columns:
         return None
 
-    mask = df["要素ID"].astype(str).str.contains(_OPERATING_INCOME_ELEMENT_HINT, na=False)
+    ids = df["要素ID"].astype(str)
+    # "SummaryOfBusinessResults"（業績等の概要、5年間サマリー）に限定することで、
+    # "OtherOperatingIncomeExpenseNet..." 等の無関係な明細行（"OperatingIncome" を
+    # 部分文字列として含むだけの別概念）を誤って拾わないようにする。
+    is_summary = ids.str.contains("SummaryOfBusinessResults", na=False)
+    mask = is_summary & ids.str.contains(_OPERATING_INCOME_ELEMENT_HINT, na=False)
     sub = df[mask]
     if sub.empty:
         return None

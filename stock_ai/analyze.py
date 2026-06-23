@@ -5,7 +5,8 @@
   テクニカル          25点
   出来高・資金流入    35点
   決算モメンタム      90点  ← EDINET取得不可時 0点（fundamental_score.py）
-  ファンダメンタル    20点  ← データなし時 0点
+  ファンダメンタル    20点  ← fundamentals テーブルに無ければEDINETから自動算出
+                            （fundamentals_fetcher.py）、それでも取得不可時 0点
 
 リスク調整（ランキング検証で確認された「当日急騰ほど翌日下落しやすい」傾向への対策）:
   過熱・連続上昇ペナルティ（config.OVERHEAT_*, CONSECUTIVE_UP_DAYS_*）  最大-23点
@@ -38,6 +39,7 @@ from config import (
     OVERHEAT_PENALTY_MID,
 )
 from fundamental_score import compute_fundamental_score
+from fundamentals_fetcher import compute_fundamentals
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +81,32 @@ def _load_fundamental_cache() -> dict:
         return {}
     finally:
         conn.close()
+
+
+def _get_fundamental_data(code: str, cache: dict) -> dict | None:
+    """
+    指定銘柄のファンダメンタルデータを返す。
+    手動CSV投入分（fundamentals テーブルの既存キャッシュ）を優先し、無ければ
+    EDINETの直近決算書類から算出する（fundamentals_fetcher.compute_fundamentals）。
+    EDINET経由で算出できた場合は fundamentals テーブルに保存し、次回以降の
+    キャッシュとして使えるようにする。取得・算出に失敗した場合は None を返す
+    （呼び出し元は fundamental_score=0点として処理を継続する）。
+    """
+    cached = cache.get(code)
+    if cached:
+        return cached
+
+    try:
+        data = compute_fundamentals(code)
+    except Exception as e:
+        logger.warning("銘柄 %s: ファンダメンタル算出に失敗: %s", code, e)
+        return None
+
+    if data:
+        from db import upsert_fundamentals
+        upsert_fundamentals([data])
+        cache[code] = data
+    return data
 
 
 def _load_market_sentiment(target_date: str) -> dict:
@@ -350,9 +378,8 @@ def _score_earnings(code: str) -> dict:
     return compute_fundamental_score(code)
 
 
-def _score_fundamental(code: str, cache: dict) -> tuple[float, str]:
+def _score_fundamental(data: dict | None) -> tuple[float, str]:
     """ファンダメンタルスコア（最大20点）。データなし時は (0, 'no_data')"""
-    data = cache.get(code)
     if not data:
         return 0.0, "no_data"
 
@@ -501,7 +528,8 @@ def run_analysis(target_date: str | None = None) -> pd.DataFrame:
     for row in filtered_rows:
         code = row["code"]
         earnings_result = _score_earnings(code)
-        fds, f_st = _score_fundamental(code, fundamental_cache)
+        fundamental_data = _get_fundamental_data(code, fundamental_cache)
+        fds, f_st = _score_fundamental(fundamental_data)
         ems = earnings_result["score"]
         total = round(
             row["technical_score"] + row["volume_flow_score"] + ems + fds
