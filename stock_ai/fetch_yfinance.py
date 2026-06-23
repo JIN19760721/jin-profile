@@ -10,7 +10,12 @@ from datetime import date, timedelta
 import pandas as pd
 import yfinance as yf
 
-from config import MARKET_SYMBOLS
+from config import (
+    MARKET_SENTIMENT_STRONG_PCT,
+    MARKET_SENTIMENT_SYMBOLS,
+    MARKET_SENTIMENT_WEAK_PCT,
+    MARKET_SYMBOLS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -228,9 +233,7 @@ def get_latest_index_summary() -> dict:
 # ── 市場環境（地合い）判定 ────────────────────────────────────
 
 # 地合い判定に使う指数（USDJPY=X, BTC-USD は market_indices への保存のみ行い、判定には使わない）
-_SENTIMENT_SYMBOLS = ["^N225", "1306.T", "^IXIC", "^GSPC"]
-_SENTIMENT_STRONG_PCT = 1.0
-_SENTIMENT_WEAK_PCT = -1.0
+# 定数は config.py（MARKET_SENTIMENT_*）で analyze.py と共用する
 
 
 def fetch_market_snapshot() -> dict[str, dict]:
@@ -279,16 +282,16 @@ def classify_market_sentiment(snapshot: dict[str, dict]) -> dict:
     """
     values = [
         snapshot[sym]["change_pct"]
-        for sym in _SENTIMENT_SYMBOLS
+        for sym in MARKET_SENTIMENT_SYMBOLS
         if sym in snapshot and snapshot[sym].get("change_pct") is not None
     ]
     if not values:
         return {"market_sentiment": None, "market_change_pct": None}
 
     avg = sum(values) / len(values)
-    if avg >= _SENTIMENT_STRONG_PCT:
+    if avg >= MARKET_SENTIMENT_STRONG_PCT:
         sentiment = "強い"
-    elif avg <= _SENTIMENT_WEAK_PCT:
+    elif avg <= MARKET_SENTIMENT_WEAK_PCT:
         sentiment = "悪い"
     else:
         sentiment = "普通"

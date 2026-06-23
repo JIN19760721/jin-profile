@@ -245,6 +245,13 @@ _ANALYSIS_NEW_COLS = [
     ("upward_revision",          "INTEGER"),
     ("op_profit_growth_50",      "INTEGER"),
     ("dividend_increase",        "INTEGER"),
+    ("consecutive_up_days",      "INTEGER"),
+    ("risk_penalty_score",       "REAL"),
+    ("risk_penalty_reason",      "TEXT"),
+    ("market_sentiment",         "TEXT"),
+    ("market_change_pct",        "REAL"),
+    ("market_sentiment_score",   "REAL"),
+    ("market_sentiment_reason",  "TEXT"),
 ]
 
 # trade_signals に追加するカラム
@@ -409,8 +416,10 @@ def upsert_analysis_results(rows: list[dict]):
          volume_ma5, trading_value_ma5,
          ma25, ma5_gap_pct, ma25_gap_pct, high_20d, high_breakout,
          earnings_data_status, fundamental_data_status, reason,
-         earnings_within_30d, upward_revision, op_profit_growth_50, dividend_increase)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         earnings_within_30d, upward_revision, op_profit_growth_50, dividend_increase,
+         consecutive_up_days, risk_penalty_score, risk_penalty_reason,
+         market_sentiment, market_change_pct, market_sentiment_score, market_sentiment_reason)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """
     data = [
         (r["code"], r["date"], r.get("company_name"), r.get("close"),
@@ -427,7 +436,10 @@ def upsert_analysis_results(rows: list[dict]):
          r.get("earnings_data_status"), r.get("fundamental_data_status"),
          r.get("reason"),
          r.get("earnings_within_30d"), r.get("upward_revision"),
-         r.get("op_profit_growth_50"), r.get("dividend_increase"))
+         r.get("op_profit_growth_50"), r.get("dividend_increase"),
+         r.get("consecutive_up_days"), r.get("risk_penalty_score"), r.get("risk_penalty_reason"),
+         r.get("market_sentiment"), r.get("market_change_pct"),
+         r.get("market_sentiment_score"), r.get("market_sentiment_reason"))
         for r in rows
     ]
     with get_conn() as conn:

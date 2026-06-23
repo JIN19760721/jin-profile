@@ -170,6 +170,11 @@ def _write_ranking(wb, df: pd.DataFrame):
         "op_profit_growth_50":     "営業利益YoY+50%以上",
         "dividend_increase":       "増配",
         "fundamental_score":       "ファンダメンタルスコア",
+        "consecutive_up_days":     "連続上昇日数",
+        "risk_penalty_score":      "過熱・連続上昇ペナルティ",
+        "market_sentiment":        "地合い",
+        "market_change_pct":       "地合い前日比(%)",
+        "market_sentiment_score":  "地合いスコア",
         "total_score":             "総合スコア",
         "reason":                  "選定理由",
     }
@@ -633,6 +638,8 @@ def _write_ranking_validation(wb, df: pd.DataFrame):
         "code":              "銘柄コード",
         "company_name":      "銘柄名",
         "total_score":       "総合スコア",
+        "entry_price":       "エントリー価格",
+        "entry_price_source": "エントリー価格の種類",
         "next_open":         "翌日始値",
         "next_high":         "翌日高値",
         "next_low":          "翌日安値",
@@ -657,6 +664,60 @@ def export_ranking_validation_excel(df_validation: pd.DataFrame, target_date: st
     _write_ranking_validation(wb, df_validation)
 
     out_path = EXCEL_DIR / f"ranking_validation_{target_date}.xlsx"
+    wb.save(out_path)
+    logger.info("Excel 出力完了: %s", out_path)
+    return out_path
+
+
+def _write_ranking_validation_all(wb, df: pd.DataFrame):
+    ws = wb.create_sheet("複数日ランキング検証")
+    col_map = {
+        "ranking_date":      "ランキング日",
+        "rank":              "順位",
+        "code":              "銘柄コード",
+        "company_name":      "銘柄名",
+        "total_score":       "総合スコア",
+        "technical_score":   "テクニカルスコア",
+        "volume_flow_score": "出来高・資金流入スコア",
+        "earnings_momentum_score": "決算モメンタムスコア",
+        "fundamental_score": "ファンダメンタルスコア",
+        "risk_penalty_score": "過熱・連続上昇ペナルティ",
+        "market_sentiment_score": "地合いスコア",
+        "entry_price":       "エントリー価格",
+        "entry_price_source": "エントリー価格の種類",
+        "next_open":         "翌日始値",
+        "next_close":        "翌日終値",
+        "max_gain_pct":      "最大上昇率(%)",
+        "max_drawdown_pct":  "最大下落率(%)",
+        "close_return_pct":  "終値リターン(%)",
+        "validation_result": "検証結果",
+    }
+    _write_df(ws, df, col_map, _C["report"])
+    logger.info("複数日ランキング検証シート: %d 行", len(df))
+
+
+def _write_score_correlation(wb, corr: pd.Series):
+    ws = wb.create_sheet("スコア要素の有効性")
+    ws.append(["スコア要素", "翌日リターンとの相関係数"])
+    _style_header(ws, _C["report"], 2)
+    for name, value in corr.items():
+        ws.append([name, round(float(value), 4)])
+    _auto_width(ws)
+    logger.info("スコア要素の有効性シート出力完了: %d 項目", len(corr))
+
+
+def export_ranking_validation_range_excel(df_validation: pd.DataFrame, corr: pd.Series) -> Path:
+    """
+    複数日分のランキング検証結果と、スコア要素ごとの相関係数を Excel に出力する。
+    """
+    import openpyxl
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    _write_score_correlation(wb, corr)
+    _write_ranking_validation_all(wb, df_validation)
+
+    out_path = EXCEL_DIR / "ranking_validation_all.xlsx"
     wb.save(out_path)
     logger.info("Excel 出力完了: %s", out_path)
     return out_path

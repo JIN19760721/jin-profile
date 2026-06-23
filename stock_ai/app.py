@@ -242,6 +242,10 @@ with tabs[0]:
             "volume_flow_score":       "出来高点",
             "earnings_momentum_score": "決算モメンタム点",
             "fundamental_score":       "ファンダメンタル点",
+            "consecutive_up_days":     "連続上昇日数",
+            "risk_penalty_score":      "過熱・連続上昇ペナルティ",
+            "market_sentiment":        "地合い",
+            "market_sentiment_score":  "地合いスコア",
             "total_score":             "合計点",
         })
         st.dataframe(df_rank_display, use_container_width=True, hide_index=True)
@@ -368,6 +372,8 @@ with tabs[6]:
                 "code":              "銘柄コード",
                 "company_name":      "銘柄名",
                 "total_score":       "総合スコア",
+                "entry_price":       "エントリー価格",
+                "entry_price_source": "エントリー価格の種類",
                 "next_open":         "翌日始値",
                 "next_high":         "翌日高値",
                 "next_low":          "翌日安値",
@@ -378,6 +384,34 @@ with tabs[6]:
                 "validation_result": "検証結果",
             })
             st.dataframe(df_validation_display, use_container_width=True, hide_index=True)
+
+    st.divider()
+    st.caption("保存済みの全日付分のランキングをまとめて検証し、スコア要素ごとの有効性（翌日リターンとの相関）を確認します。")
+    if st.button("全期間まとめて検証"):
+        from ranking_validation import correlation_summary, summarize_by_score_band, validate_ranking_range
+        with st.spinner("複数日検証中..."):
+            df_all = validate_ranking_range()
+        if df_all.empty:
+            st.info("検証可能なランキングデータがありません。")
+        else:
+            st.write(f"対象: {df_all['ranking_date'].nunique()}日分 / {len(df_all)}銘柄")
+            counts = df_all["validation_result"].value_counts()
+            labels = ["HIT", "GOOD", "OK", "NEUTRAL", "BAD"]
+            st.write(" / ".join(f"{label}: {counts.get(label, 0)}件" for label in labels))
+
+            st.write("**スコア要素と翌日リターンの相関係数**（プラスほど「高スコア→翌日上昇」との結びつきが強い）")
+            corr = correlation_summary(df_all)
+            st.dataframe(corr.rename("相関係数").reset_index().rename(columns={"index": "スコア要素"}),
+                         use_container_width=True, hide_index=True)
+
+            score_col = st.selectbox(
+                "スコア帯別の的中率を確認する要素",
+                ["earnings_momentum_score", "technical_score", "volume_flow_score",
+                 "fundamental_score", "risk_penalty_score", "market_sentiment_score"],
+            )
+            band_df = summarize_by_score_band(df_all, score_col)
+            if not band_df.empty:
+                st.dataframe(band_df, use_container_width=True, hide_index=True)
 
 # --- settings.yaml ---
 with tabs[7]:

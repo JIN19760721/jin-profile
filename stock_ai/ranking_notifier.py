@@ -51,7 +51,8 @@ def get_latest_ranking(top_n: int | None = None) -> pd.DataFrame:
             SELECT rank, code, company_name, close, change_pct,
                    volume_ratio_5d, trading_value,
                    technical_score, volume_flow_score, earnings_momentum_score,
-                   fundamental_score, total_score, reason
+                   fundamental_score, consecutive_up_days, risk_penalty_score,
+                   market_sentiment, market_sentiment_score, total_score, reason
             FROM analysis_results
             WHERE date = ?
             ORDER BY rank ASC

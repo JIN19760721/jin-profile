@@ -227,3 +227,19 @@ MAX_PRICE = 200000        # 最高終値（円）
 MIN_PRICE_CHANGE_PCT = 3.0  # 最低前日比（%）
 MIN_VOLUME_RATIO = 2.0    # 出来高/5日平均の最低倍率
 MIN_TURNOVER = 50_000_000   # 最低売買代金（5000万円）
+
+# 地合い判定に使う指数（fetch_yfinance.py の市場指数取得・analyze.py のランキング統合で共用）
+MARKET_SENTIMENT_SYMBOLS = ["^N225", "1306.T", "^IXIC", "^GSPC"]
+MARKET_SENTIMENT_STRONG_PCT = 1.0
+MARKET_SENTIMENT_WEAK_PCT = -1.0
+
+# 過熱・連続上昇リスク調整（ランキングの的中率向上のため。翌日リバーサルしやすい
+# 「当日大幅上昇済み」「連続上昇日数が長い」銘柄のスコアを減点する）
+OVERHEAT_CHANGE_PCT_HIGH = 20.0   # 前日比この%以上で強めに減点
+OVERHEAT_CHANGE_PCT_MID = 12.0    # 前日比この%以上で軽めに減点
+OVERHEAT_PENALTY_HIGH = -15.0
+OVERHEAT_PENALTY_MID = -7.0
+CONSECUTIVE_UP_DAYS_THRESHOLD = 4  # 連続上昇日数がこれ以上で減点
+CONSECUTIVE_UP_DAYS_PENALTY = -8.0
+MARKET_SENTIMENT_BAD_PENALTY = -10.0   # 地合いが「悪い」日の減点
+MARKET_SENTIMENT_STRONG_BONUS = 5.0    # 地合いが「強い」日の加点

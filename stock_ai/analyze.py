@@ -1,11 +1,15 @@
 """
 注目銘柄の分析ロジック。
 
-スコア構成（合計100点）:
+スコア構成（基本加点は最大170点、過熱/連続上昇/地合いによる調整あり）:
   テクニカル          25点
   出来高・資金流入    35点
-  決算モメンタム      20点  ← データなし時 0点
+  決算モメンタム      90点  ← EDINET取得不可時 0点（fundamental_score.py）
   ファンダメンタル    20点  ← データなし時 0点
+
+リスク調整（ランキング検証で確認された「当日急騰ほど翌日下落しやすい」傾向への対策）:
+  過熱・連続上昇ペナルティ（config.OVERHEAT_*, CONSECUTIVE_UP_DAYS_*）  最大-23点
+  地合い（市場全体の前日比）による加減点（config.MARKET_SENTIMENT_*）  ±10点
 """
 
 import logging
@@ -15,12 +19,23 @@ from datetime import date, timedelta
 import pandas as pd
 
 from config import (
+    CONSECUTIVE_UP_DAYS_PENALTY,
+    CONSECUTIVE_UP_DAYS_THRESHOLD,
     DB_PATH,
+    MARKET_SENTIMENT_BAD_PENALTY,
+    MARKET_SENTIMENT_STRONG_BONUS,
+    MARKET_SENTIMENT_STRONG_PCT,
+    MARKET_SENTIMENT_SYMBOLS,
+    MARKET_SENTIMENT_WEAK_PCT,
     MAX_PRICE,
     MIN_PRICE,
     MIN_PRICE_CHANGE_PCT,
     MIN_TURNOVER,
     MIN_VOLUME_RATIO,
+    OVERHEAT_CHANGE_PCT_HIGH,
+    OVERHEAT_CHANGE_PCT_MID,
+    OVERHEAT_PENALTY_HIGH,
+    OVERHEAT_PENALTY_MID,
 )
 from fundamental_score import compute_fundamental_score
 
@@ -64,6 +79,56 @@ def _load_fundamental_cache() -> dict:
         return {}
     finally:
         conn.close()
+
+
+def _load_market_sentiment(target_date: str) -> dict:
+    """
+    market_indices から target_date 時点の地合い（日経平均・TOPIX連動ETF・NASDAQ・
+    S&P500の前日比の単純平均）を判定する。データが無ければ判定不可として
+    {"market_sentiment": None, "market_change_pct": None} を返す。
+    fetch_yfinance.classify_market_sentiment() と同じ閾値・指数を使うが、
+    そちらはリアルタイム取得用、これは過去日の DB データを参照する点が異なる。
+    """
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        placeholders = ",".join("?" * len(MARKET_SENTIMENT_SYMBOLS))
+        df = pd.read_sql_query(
+            f"SELECT symbol, date, close FROM market_indices "
+            f"WHERE symbol IN ({placeholders}) AND date <= ? ORDER BY date",
+            conn, params=(*MARKET_SENTIMENT_SYMBOLS, target_date),
+        )
+    except Exception as e:
+        logger.warning("地合い判定用の市場指数取得に失敗: %s", e)
+        return {"market_sentiment": None, "market_change_pct": None}
+    finally:
+        conn.close()
+
+    if df.empty:
+        return {"market_sentiment": None, "market_change_pct": None}
+
+    changes = []
+    for _symbol, grp in df.groupby("symbol"):
+        grp = grp.sort_values("date")
+        today_rows = grp[grp["date"] == target_date]
+        prev_rows = grp[grp["date"] < target_date]
+        if today_rows.empty or prev_rows.empty:
+            continue
+        today_close = _safe(today_rows.iloc[-1]["close"])
+        prev_close = _safe(prev_rows.iloc[-1]["close"])
+        if today_close and prev_close:
+            changes.append((today_close - prev_close) / prev_close * 100)
+
+    if not changes:
+        return {"market_sentiment": None, "market_change_pct": None}
+
+    avg = sum(changes) / len(changes)
+    if avg >= MARKET_SENTIMENT_STRONG_PCT:
+        sentiment = "強い"
+    elif avg <= MARKET_SENTIMENT_WEAK_PCT:
+        sentiment = "悪い"
+    else:
+        sentiment = "普通"
+    return {"market_sentiment": sentiment, "market_change_pct": round(avg, 2)}
 
 
 # ── 特徴量計算 ─────────────────────────────────────────────────
@@ -144,6 +209,9 @@ def _compute_features(df: pd.DataFrame, target_date: str) -> pd.DataFrame:
         recent_closes = list(closes.tail(6).values)
         trend_5d = sum(1 for i in range(1, len(recent_closes)) if recent_closes[i] > recent_closes[i - 1])
 
+        # 連続上昇日数（target_dateから遡って終値が連続で前日を上回っている日数）
+        consecutive_up_days = _consecutive_up_days(closes)
+
         def _r(v, n=2):
             return round(v, n) if v is not None else None
 
@@ -170,9 +238,22 @@ def _compute_features(df: pd.DataFrame, target_date: str) -> pd.DataFrame:
             "high_20d":                _r(high_20d),
             "high_breakout":           high_breakout,
             "trend_5d":                trend_5d,
+            "consecutive_up_days":     consecutive_up_days,
         })
 
     return pd.DataFrame(records)
+
+
+def _consecutive_up_days(closes: pd.Series) -> int:
+    """target_date を含む終値系列から、末尾から遡って連続で前日比上昇している日数を返す"""
+    vals = list(closes.values)
+    count = 0
+    for i in range(len(vals) - 1, 0, -1):
+        if vals[i] > vals[i - 1]:
+            count += 1
+        else:
+            break
+    return count
 
 
 # ── スコアリング ───────────────────────────────────────────────
@@ -224,6 +305,40 @@ def _score_volume_flow(row: dict) -> float:
         score += 10
 
     return min(score, 35.0)
+
+
+def _score_risk_penalty(row: dict) -> tuple[float, list[str]]:
+    """
+    過熱・連続上昇リスクによる減点（0以下）。
+    翌営業日の値動きを検証した結果、当日の前日比が大きいほど翌日は下落しやすい
+    傾向（負の相関）が確認されたため、過熱した銘柄ほど減点して的中率向上を図る。
+    """
+    change = row.get("change_pct") or 0
+    streak = row.get("consecutive_up_days") or 0
+    penalty = 0.0
+    reasons: list[str] = []
+
+    if change >= OVERHEAT_CHANGE_PCT_HIGH:
+        penalty += OVERHEAT_PENALTY_HIGH
+        reasons.append(f"前日比+{change:.1f}%は過熱気味のため減点")
+    elif change >= OVERHEAT_CHANGE_PCT_MID:
+        penalty += OVERHEAT_PENALTY_MID
+        reasons.append(f"前日比+{change:.1f}%はやや過熱のため減点")
+
+    if streak >= CONSECUTIVE_UP_DAYS_THRESHOLD:
+        penalty += CONSECUTIVE_UP_DAYS_PENALTY
+        reasons.append(f"{streak}日連続上昇のため減点")
+
+    return penalty, reasons
+
+
+def _score_market_sentiment(market_sentiment: str | None) -> tuple[float, list[str]]:
+    """地合い（市場全体の前日比）によるスコア調整"""
+    if market_sentiment == "悪い":
+        return MARKET_SENTIMENT_BAD_PENALTY, ["地合いが悪いため減点"]
+    if market_sentiment == "強い":
+        return MARKET_SENTIMENT_STRONG_BONUS, ["地合いが強いため加点"]
+    return 0.0, []
 
 
 def _score_earnings(code: str) -> dict:
@@ -291,7 +406,14 @@ def _make_reason(row: dict) -> str:
     elif ma5 and close > ma5:
         parts.append("MA5↑")
 
-    return " / ".join(parts[:4])
+    parts = parts[:4]
+
+    if row.get("risk_penalty_reason"):
+        parts.append(row["risk_penalty_reason"])
+    if row.get("market_sentiment_reason"):
+        parts.append(row["market_sentiment_reason"])
+
+    return " / ".join(parts)
 
 
 # ── フィルター ─────────────────────────────────────────────────
@@ -337,6 +459,16 @@ def run_analysis(target_date: str | None = None) -> pd.DataFrame:
     if not fundamental_cache:
         logger.info("ファンダメンタルデータなし: fundamental_score = 0 点で処理継続")
 
+    market_sentiment_info = _load_market_sentiment(target_date)
+    logger.info(
+        "地合い判定: %s (主要4指数平均前日比 %s%%)",
+        market_sentiment_info["market_sentiment"] or "判定不可",
+        market_sentiment_info["market_change_pct"],
+    )
+    market_sentiment_score, market_sentiment_reasons = _score_market_sentiment(
+        market_sentiment_info["market_sentiment"]
+    )
+
     # 2. 特徴量計算
     df_feat = _compute_features(df_raw, target_date)
     logger.info("特徴量計算完了: %d 銘柄", len(df_feat))
@@ -344,11 +476,16 @@ def run_analysis(target_date: str | None = None) -> pd.DataFrame:
     if df_feat.empty:
         return pd.DataFrame()
 
-    # 3. テクニカル・出来高スコアリング（全銘柄、外部APIを使わないため低コスト）
+    # 3. テクニカル・出来高スコアリング・過熱/連続上昇リスク減点（全銘柄、外部APIを使わないため低コスト）
     rows = df_feat.to_dict("records")
     for row in rows:
         row["technical_score"] = _score_technical(row)
         row["volume_flow_score"] = _score_volume_flow(row)
+        risk_penalty, risk_reasons = _score_risk_penalty(row)
+        row["risk_penalty_score"] = risk_penalty
+        row["risk_penalty_reason"] = "、".join(risk_reasons)
+        row["market_sentiment"] = market_sentiment_info["market_sentiment"]
+        row["market_change_pct"] = market_sentiment_info["market_change_pct"]
 
     df_scored = pd.DataFrame(rows)
 
@@ -366,11 +503,17 @@ def run_analysis(target_date: str | None = None) -> pd.DataFrame:
         earnings_result = _score_earnings(code)
         fds, f_st = _score_fundamental(code, fundamental_cache)
         ems = earnings_result["score"]
-        total = round(row["technical_score"] + row["volume_flow_score"] + ems + fds, 2)
+        total = round(
+            row["technical_score"] + row["volume_flow_score"] + ems + fds
+            + row["risk_penalty_score"] + market_sentiment_score,
+            2,
+        )
 
         row.update({
             "earnings_momentum_score": ems,
             "fundamental_score":       fds,
+            "market_sentiment_score":  market_sentiment_score,
+            "market_sentiment_reason": "、".join(market_sentiment_reasons),
             "total_score":             total,
             "earnings_data_status":    "available" if ems else "no_data",
             "fundamental_data_status": f_st,

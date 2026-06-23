@@ -446,6 +446,39 @@ def run_validate_ranking_mode(args, logger):
     logger.info("=" * 60)
 
 
+def run_validate_ranking_all_mode(args, logger):
+    """
+    analysis_results に存在する全日付分のランキングをまとめて検証し、
+    スコア要素ごとの相関・スコア帯別の的中率を集計する。
+    1日分の検証ではサンプル数が少なく判断できない、各スコア要素（特に
+    決算モメンタムスコア）の有効性を、複数日分のデータで確認するために使う。
+    """
+    logger.info("=" * 60)
+    logger.info("複数日ランキング検証開始")
+    logger.info("=" * 60)
+
+    from db import init_db
+    init_db()
+
+    from ranking_validation import correlation_summary, validate_ranking_range
+    df_validation = validate_ranking_range(args.start_date, args.end_date)
+
+    if df_validation.empty:
+        logger.warning("検証結果がありませんでした。")
+        return
+
+    corr = correlation_summary(df_validation)
+    logger.info("スコア要素と翌日リターンの相関係数:\n%s", corr.to_string())
+
+    from export_excel import export_ranking_validation_range_excel
+    out_path = export_ranking_validation_range_excel(df_validation, corr)
+    logger.info("複数日ランキング検証結果出力先: %s", out_path)
+
+    logger.info("=" * 60)
+    logger.info("処理完了")
+    logger.info("=" * 60)
+
+
 def run_backtest_mode(args, logger):
     """
     過去の intraday_prices データを使って現行の判定ロジックをバックテストする。
@@ -566,6 +599,18 @@ def main():
     )
     parser.add_argument("--validate-ranking", action="store_true",
                          help="--date で指定した日の注目銘柄ランキングが翌営業日に有効だったか検証する（--date必須）")
+    parser.add_argument(
+        "--validate-ranking-all", action="store_true",
+        help="保存済みの全日付分のランキングをまとめて検証し、スコア要素ごとの相関・的中率を集計する",
+    )
+    parser.add_argument(
+        "--start-date", default=None, metavar="YYYY-MM-DD",
+        help="--validate-ranking-all の対象開始日（省略時は最古日から）",
+    )
+    parser.add_argument(
+        "--end-date", default=None, metavar="YYYY-MM-DD",
+        help="--validate-ranking-all の対象終了日（省略時は最新日まで）",
+    )
     parser.add_argument("--clear-watchlist", action="store_true",
                          help="watchlist の全エントリーを is_active=0 にして監視対象をクリアする")
     args = parser.parse_args()
@@ -581,6 +626,10 @@ def main():
 
     if args.validate_ranking:
         run_validate_ranking_mode(args, logger)
+        return
+
+    if args.validate_ranking_all:
+        run_validate_ranking_all_mode(args, logger)
         return
 
     if args.backtest:
