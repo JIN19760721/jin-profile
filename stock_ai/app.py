@@ -226,7 +226,7 @@ with col_w1:
 
 tabs = st.tabs([
     "ランキング", "watchlist", "5分足データ", "デイトレ判定",
-    "BUY/WAIT/SELL", "日次レポート", "settings.yaml",
+    "BUY/WAIT/SELL", "日次レポート", "ランキング検証", "settings.yaml",
 ])
 
 # --- ランキング ---
@@ -348,8 +348,39 @@ with tabs[5]:
         else:
             st.dataframe(df_report, use_container_width=True, hide_index=True)
 
-# --- settings.yaml ---
+# --- ランキング検証 ---
 with tabs[6]:
+    from datetime import date as _date2
+    st.caption("対象日の注目銘柄ランキングが、翌営業日にどう値動きしたかを検証します。")
+    validation_date = st.date_input("検証対象日（ランキング作成日）", value=_date2.today(), key="validation_date")
+    if st.button("この日付でランキング検証を実行"):
+        from ranking_validation import validate_ranking
+        with st.spinner("検証中..."):
+            df_validation = validate_ranking(str(validation_date))
+        if df_validation.empty:
+            st.info(f"{validation_date} のランキングデータ、または翌営業日の株価データがありません。")
+        else:
+            counts = df_validation["validation_result"].value_counts()
+            labels = ["HIT", "GOOD", "OK", "NEUTRAL", "BAD"]
+            st.write(" / ".join(f"{label}: {counts.get(label, 0)}件" for label in labels))
+            df_validation_display = df_validation.rename(columns={
+                "rank":              "順位",
+                "code":              "銘柄コード",
+                "company_name":      "銘柄名",
+                "total_score":       "総合スコア",
+                "next_open":         "翌日始値",
+                "next_high":         "翌日高値",
+                "next_low":          "翌日安値",
+                "next_close":        "翌日終値",
+                "max_gain_pct":      "最大上昇率(%)",
+                "max_drawdown_pct":  "最大下落率(%)",
+                "close_return_pct":  "終値リターン(%)",
+                "validation_result": "検証結果",
+            })
+            st.dataframe(df_validation_display, use_container_width=True, hide_index=True)
+
+# --- settings.yaml ---
+with tabs[7]:
     if SETTINGS_PATH.exists():
         with open(SETTINGS_PATH, encoding="utf-8") as f:
             settings_dict = yaml.safe_load(f) or {}
