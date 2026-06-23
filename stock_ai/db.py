@@ -594,10 +594,20 @@ def get_company_name(code: str) -> str | None:
         return row["company_name"] if row else None
 
 
-def get_stopped_codes() -> set[str]:
-    """監視終了済み（STOPPED）の銘柄コード集合を返す。次回以降の --intraday 対象から除外するために使う"""
+def get_stopped_codes(today: str | None = None) -> set[str]:
+    """
+    本日 STOPPED になった銘柄コード集合を返す。--intraday 対象から除外するために使う。
+    stopped_at が当日より前の銘柄は翌営業日以降として自動的に監視対象に戻すため、
+    ここでは除外しない（手動の resume_monitoring を呼ばなくても日付が変われば再監視可能になる）。
+    """
+    if today is None:
+        from datetime import date
+        today = str(date.today())
     with get_conn() as conn:
-        cursor = conn.execute("SELECT code FROM monitoring_status WHERE status = 'STOPPED'")
+        cursor = conn.execute(
+            "SELECT code FROM monitoring_status WHERE status = 'STOPPED' AND date(stopped_at) = ?",
+            (today,),
+        )
         return {row["code"] for row in cursor.fetchall()}
 
 

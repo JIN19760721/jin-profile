@@ -62,6 +62,7 @@ LINE_REPLY_URL = "https://api.line.me/v2/bot/message/reply"
 _MAX_CODES = 5
 _CODES_ONLY_RE = re.compile(r"^[0-9A-Za-z\s,、，　]+$")
 _CODE_PATTERN_RE = re.compile(r"\b[0-9A-Za-z]{4}\b")
+_RESUME_PREFIX_RE = re.compile(r"^(再開|resume)\s*", re.IGNORECASE)
 
 
 # ── 署名検証 ──────────────────────────────────────────────────────────────────
@@ -199,6 +200,57 @@ def _is_watch_command(text: str) -> bool:
     return bool(_CODES_ONLY_RE.match(t) and _CODE_PATTERN_RE.search(t))
 
 
+def _is_resume_command(text: str) -> bool:
+    """テキストが監視再開コマンドかどうかを判定する（例: 再開 6125 / resume 6125）"""
+    lower = text.strip().lower()
+    return lower.startswith("再開") or lower.startswith("resume")
+
+
+def _handle_resume_command(text: str, reply_token: str) -> None:
+    """
+    本日 STOPPED（監視終了済み）になった銘柄の監視再開コマンドを処理する。
+    翌営業日以降は db.get_stopped_codes() の対象から自動的に外れるため、
+    このコマンドは「同日中に再度監視したい」場合にのみ意味を持つ。
+    """
+    if not is_trading_day():
+        _reply(reply_token, "本日は取引日ではありません。")
+        return
+
+    from datetime import datetime as _datetime
+
+    from db import get_stopped_codes, resume_monitoring
+
+    cleaned = _RESUME_PREFIX_RE.sub("", text.strip())
+    codes = parse_watch_codes(cleaned)
+    if not codes:
+        _reply(reply_token, "再開する銘柄コードを指定してください（例: 再開 6125）。")
+        return
+
+    stopped_codes = get_stopped_codes()
+    now_str = _datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    resumed = [c for c in codes if c in stopped_codes]
+    not_stopped = [c for c in codes if c not in stopped_codes]
+
+    for code in resumed:
+        resume_monitoring(code, now_str)
+
+    lines = []
+    if resumed:
+        lines.append("監視を再開しました: " + " ".join(resumed))
+        market_open = is_market_open_now()
+        if market_open:
+            _trigger_intraday_monitoring(resumed)
+            lines.append("取引時間中のため、5分足監視をバックグラウンドで開始しました。")
+        else:
+            lines.append("取引時間外のため監視待機中です。取引時間（09:00〜15:30）になると自動的に監視を開始します。")
+    if not_stopped:
+        lines.append("以下は本日監視終了されていないため再開対象外です: " + " ".join(not_stopped))
+    if not lines:
+        lines.append("再開できる銘柄がありませんでした。")
+
+    _reply(reply_token, "\n".join(lines))
+
+
 def _handle_text_message(text: str, reply_token: str) -> None:
     """テキストメッセージを処理して watchlist 登録・返信を行う"""
     if not _is_watch_command(text):
@@ -284,7 +336,10 @@ def callback():
         reply_token = event.get("replyToken", "")
         if text and reply_token:
             try:
-                _handle_text_message(text, reply_token)
+                if _is_resume_command(text):
+                    _handle_resume_command(text, reply_token)
+                else:
+                    _handle_text_message(text, reply_token)
             except Exception as e:
                 logger.error("メッセージ処理エラー: %s", e, exc_info=True)
 
