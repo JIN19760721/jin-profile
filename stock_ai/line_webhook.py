@@ -260,21 +260,21 @@ def _is_watchlist_status_command(text: str) -> bool:
 
 def _handle_watchlist_status_command(reply_token: str) -> None:
     """
-    現在アクティブな監視銘柄（スコア順位スロット最大5件＋ストップ高翌日継続候補）を
-    LINEに返信する。
+    現在「有効」な監視対象（本日STOPPED済みを除く、スコア順位スロット最大5件＋
+    ストップ高翌日継続候補）をLINEに返信する。
     """
     status = get_watchlist_status()
     scored = status["scored"]
     stop_high = status["stop_high"]
 
-    lines = ["【現在の監視銘柄】"]
+    lines = ["【現在の監視銘柄（本日監視終了済みを除く）】"]
     if scored:
         for row in scored:
             name = row.get("company_name") or ""
             source_label = "LINE指定" if row.get("source") == "LINE" else "ランキング"
             lines.append(f"{row['slot_rank']}. {row['code']} {name}（{source_label}）".strip())
     else:
-        lines.append("（なし）")
+        lines.append("（本日は対象銘柄がすべて監視終了済みです）")
 
     lines.append("")
     if stop_high:

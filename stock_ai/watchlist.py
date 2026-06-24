@@ -103,8 +103,12 @@ _SCORED_SLOTS = 5  # スコア順位スロット数（ストップ高枠は別�
 
 
 def _normalize_codes(codes: list[str]) -> list[str]:
-    """5桁J-Quantsコード（末尾0）を4桁に正規化する"""
-    return [c[:-1] if len(c) == 5 and c.isdigit() and c.endswith("0") else c for c in codes]
+    """
+    5桁J-Quantsコード（末尾0）を4桁に正規化する。
+    J-Quantsは英字を含む新形式コードも含めて全銘柄を5桁（末尾0埋め）で返すため、
+    数字限定（isdigit）にせず判定する（141A0 → 141A 等）。
+    """
+    return [c[:-1] if len(c) == 5 and c.endswith("0") else c for c in codes]
 
 
 def register_default_watchlist(
@@ -212,15 +216,21 @@ def apply_line_watchlist(codes: list[str]) -> list[dict]:
 
 def get_watchlist_status() -> dict:
     """
-    現在アクティブな監視銘柄一覧（スコア順位スロット最大5件＋ストップ高枠）を返す。
+    現在「有効」な監視対象一覧（スコア順位スロット最大5件＋ストップ高枠）を返す。
     LINEの「監視リスト」コマンドへの応答に使う。
+
+    watchlistにアクティブ登録されていても、本日STOP_LOSS/TAKE_PROFIT/時間切れ等で
+    監視終了済み（db.get_stopped_codes()）の銘柄は、main.py の run_intraday_mode()
+    と同じ基準で除外する（実際にはその日もう判定ロジックが走らないため）。
+    翌営業日になれば自動的に対象復帰し、ここにも再び表示される。
 
     Returns:
         dict: {"scored": [...], "stop_high": dict | None}
     """
-    from db import get_active_watchlist
+    from db import get_active_watchlist, get_stopped_codes
 
-    rows = get_active_watchlist()
+    stopped = get_stopped_codes()
+    rows = [r for r in get_active_watchlist() if r["code"] not in stopped]
     scored = [r for r in rows if r.get("source") != _STOP_HIGH_SOURCE]
     stop_high = next((r for r in rows if r.get("source") == _STOP_HIGH_SOURCE), None)
     return {"scored": scored, "stop_high": stop_high}
@@ -240,7 +250,7 @@ def register_watchlist(codes: list[str], source: str = "LINE") -> list[dict]:
     """
     from db import deactivate_watchlist, upsert_watchlist_entries
 
-    codes = [c[:-1] if len(c) == 5 and c.isdigit() and c.endswith("0") else c for c in codes]
+    codes = _normalize_codes(codes)
 
     if len(codes) > _MAX_WATCH_CODES:
         logger.warning(
@@ -299,7 +309,7 @@ def get_top_ranked_codes(limit: int = 5) -> list[str]:
             (latest_date, limit),
         ).fetchall()
         conn.close()
-        return [r[0][:-1] if len(r[0]) == 5 and r[0].isdigit() and r[0].endswith("0") else r[0] for r in rows]
+        return _normalize_codes([r[0] for r in rows])
     except Exception as e:
         logger.error("ランキング上位取得エラー: %s", e)
         return []
