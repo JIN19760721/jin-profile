@@ -104,8 +104,15 @@ def register_watchlist(codes: list[str], source: str = "LINE") -> list[dict]:
     最大 _MAX_WATCH_CODES（5）件を超える場合は先頭から切り捨てる
     （--intraday の対象は最大5件のため、watchlist もそれに合わせる）。
     登録した銘柄の dict リストを返す。
+
+    codes は4桁コードを想定するが、analysis_results 由来（source="RANKING"）は
+    J-Quants の5桁表記（末尾0）のまま渡されることがあるため、5桁→4桁に正規化する
+    （正規化しないと intraday_monitor.code_to_ticker() が誤ったティッカー
+    "XXXXX0.T" を組み立て、5分足取得が常に失敗する）。
     """
     from db import deactivate_watchlist, upsert_watchlist_entries
+
+    codes = [c[:-1] if len(c) == 5 and c.isdigit() and c.endswith("0") else c for c in codes]
 
     if len(codes) > _MAX_WATCH_CODES:
         logger.warning(
@@ -145,6 +152,9 @@ def get_top_ranked_codes(limit: int = 5) -> list[str]:
     analysis_results の最新分析日のランキング上位 limit 件のコードを返す。
     --codes 未指定かつ watchlist が空の場合の、--intraday のフォールバック先として使う。
     データがなければ空リストを返す。
+
+    analysis_results.code は J-Quants の5桁表記（末尾0）のため、4桁に正規化して返す
+    （正規化しないと intraday_monitor.code_to_ticker() が誤ったティッカーを組み立てる）。
     """
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -160,7 +170,7 @@ def get_top_ranked_codes(limit: int = 5) -> list[str]:
             (latest_date, limit),
         ).fetchall()
         conn.close()
-        return [r[0] for r in rows]
+        return [r[0][:-1] if len(r[0]) == 5 and r[0].isdigit() and r[0].endswith("0") else r[0] for r in rows]
     except Exception as e:
         logger.error("ランキング上位取得エラー: %s", e)
         return []
