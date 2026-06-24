@@ -615,10 +615,12 @@ def run_analysis(target_date: str | None = None) -> pd.DataFrame:
     # 7. 本日ストップ高の翌日継続候補（スコアに依存しない別枠、rank=0で先頭掲載）。
     # ストップ高は前日比が抽出条件の上限（MAX_PRICE_CHANGE_PCT）を大きく超えるため、
     # 通常の候補（df_filtered）には含まれない df_feat（フィルター前の全銘柄）から探す。
+    # 既に通常ランキングに含まれる銘柄は対象から除外し、ランキング側はそのまま残す
+    # （同じ銘柄が両方に重複表示されないようにする。除外後に別の銘柄が選ばれる）。
     df_filtered["stop_high_pick"] = False
-    stop_high_pick = _pick_stop_high_continuation_candidate(df_feat)
+    ranked_codes = set(df_filtered["code"])
+    stop_high_pick = _pick_stop_high_continuation_candidate(df_feat, exclude_codes=ranked_codes)
     if stop_high_pick is not None:
-        df_filtered = df_filtered[df_filtered["code"] != stop_high_pick["code"]]
         df_filtered = pd.concat([pd.DataFrame([stop_high_pick]), df_filtered], ignore_index=True)
         logger.info("ストップ高翌日継続候補: %s (%s)", stop_high_pick["code"], stop_high_pick["company_name"])
 
@@ -626,15 +628,21 @@ def run_analysis(target_date: str | None = None) -> pd.DataFrame:
     return df_filtered
 
 
-def _pick_stop_high_continuation_candidate(df_feat: pd.DataFrame) -> dict | None:
+def _pick_stop_high_continuation_candidate(
+    df_feat: pd.DataFrame, exclude_codes: set[str] | None = None,
+) -> dict | None:
     """
     本日ストップ高だった銘柄の中から、翌日も継続しやすいと考えられる銘柄を1件選ぶ。
     選定基準: 出来高倍率(5日平均比)が高いほど需給が強く継続しやすいと考え、
     出来高倍率の降順、同率の場合は売買代金の降順で1件のみ選ぶ。
-    ストップ高銘柄が存在しない場合は None を返す（ランキングには掲載しない）。
+    exclude_codes に含まれる銘柄（通常ランキングに既に掲載されている銘柄）は対象から
+    除外し、重複表示を避ける。ストップ高銘柄が存在しない（除外後に0件になった）場合は
+    None を返す（ランキングには掲載しない）。
     スコアリング（total_score）には一切依存しない、別枠の注目株のため rank=0 とする。
     """
     candidates = df_feat[df_feat["is_stop_high"]].copy()
+    if exclude_codes:
+        candidates = candidates[~candidates["code"].isin(exclude_codes)]
     if candidates.empty:
         return None
 
