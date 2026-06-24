@@ -155,6 +155,7 @@ def _write_ranking(wb, df: pd.DataFrame):
     ws = wb.create_sheet("注目銘柄ランキング")
     col_map = {
         "rank":                    "順位",
+        "stop_high_pick":          "ストップ高翌日継続候補",
         "code":                    "銘柄コード",
         "company_name":            "銘柄名",
         "close":                   "終値",

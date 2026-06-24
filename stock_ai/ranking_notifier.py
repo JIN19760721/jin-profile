@@ -49,7 +49,7 @@ def get_latest_ranking(top_n: int | None = None) -> pd.DataFrame:
 
         query = """
             SELECT rank, code, company_name, close, change_pct,
-                   volume_ratio_5d, trading_value,
+                   volume_ratio_5d, trading_value, stop_high_pick,
                    technical_score, volume_flow_score, baseline_score, earnings_momentum_score,
                    fundamental_score, consecutive_up_days, risk_penalty_score,
                    market_sentiment, market_sentiment_score, total_score, reason

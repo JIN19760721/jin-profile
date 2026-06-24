@@ -238,6 +238,7 @@ with tabs[0]:
     else:
         st.caption(f"対象日: {df_rank.attrs.get('date', '')}")
         df_rank_display = df_rank.rename(columns={
+            "stop_high_pick":          "ストップ高翌日継続候補",
             "technical_score":         "テクニカル点",
             "volume_flow_score":       "出来高点",
             "baseline_score":          "ベースライン点(検証済み)",

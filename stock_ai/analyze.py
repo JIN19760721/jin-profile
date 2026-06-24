@@ -169,6 +169,42 @@ def _load_market_sentiment(target_date: str) -> dict:
     return {"market_sentiment": sentiment, "market_change_pct": round(avg, 2)}
 
 
+# ── ストップ高判定 ─────────────────────────────────────────────
+
+# 東証の値幅制限（基準値段に対する制限値幅）の標準テーブル。
+# (基準値段の上限（未満）, 制限値幅) のペアを価格帯の昇順で並べたもの。
+# 実際の制限値幅は基準値段（通常は前日終値）によって決まる固定テーブルであり、
+# yfinance 経由では当日の値幅制限（upper_limit）データが取得できないため、
+# このテーブルを使って自前で計算する。
+_PRICE_LIMIT_TABLE = [
+    (100, 30), (200, 50), (300, 80), (500, 100), (700, 150), (1000, 200),
+    (1500, 300), (2000, 400), (3000, 500), (5000, 700), (7000, 1000),
+    (10000, 1500), (15000, 2000), (20000, 3000), (30000, 4000), (50000, 5000),
+    (70000, 7000), (100000, 10000), (150000, 15000), (200000, 20000),
+    (300000, 30000), (500000, 50000), (700000, 70000), (1_000_000, 100_000),
+    (1_500_000, 150_000), (2_000_000, 200_000), (3_000_000, 300_000),
+    (5_000_000, 500_000), (7_000_000, 700_000), (10_000_000, 1_000_000),
+    (15_000_000, 1_500_000), (20_000_000, 2_000_000), (30_000_000, 3_000_000),
+    (50_000_000, 5_000_000),
+]
+
+
+def _price_limit_move(prev_close: float) -> float:
+    """前日終値（基準値段）に対する制限値幅を返す（東証の標準テーブル）"""
+    for threshold, move in _PRICE_LIMIT_TABLE:
+        if prev_close < threshold:
+            return move
+    return _PRICE_LIMIT_TABLE[-1][1]
+
+
+def _is_stop_high(prev_close: float | None, close: float | None) -> bool:
+    """前日終値からの値幅制限テーブルに基づき、本日ストップ高（上限値に到達）かを判定する"""
+    if not prev_close or prev_close <= 0 or not close:
+        return False
+    limit_price = prev_close + _price_limit_move(prev_close)
+    return close >= limit_price - 0.5  # 丸め誤差を許容
+
+
 # ── 特徴量計算 ─────────────────────────────────────────────────
 
 
@@ -250,6 +286,9 @@ def _compute_features(df: pd.DataFrame, target_date: str) -> pd.DataFrame:
         # 連続上昇日数（target_dateから遡って終値が連続で前日を上回っている日数）
         consecutive_up_days = _consecutive_up_days(closes)
 
+        # 本日ストップ高（値幅制限の上限に達したか）
+        is_stop_high = _is_stop_high(prev_close, close)
+
         def _r(v, n=2):
             return round(v, n) if v is not None else None
 
@@ -277,6 +316,7 @@ def _compute_features(df: pd.DataFrame, target_date: str) -> pd.DataFrame:
             "high_breakout":           high_breakout,
             "trend_5d":                trend_5d,
             "consecutive_up_days":     consecutive_up_days,
+            "is_stop_high":            is_stop_high,
         })
 
     return pd.DataFrame(records)
@@ -572,5 +612,49 @@ def run_analysis(target_date: str | None = None) -> pd.DataFrame:
     df_filtered["rank"] = df_filtered.index + 1
     df_filtered["reason"] = df_filtered.apply(lambda r: _make_reason(r.to_dict()), axis=1)
 
+    # 7. 本日ストップ高の翌日継続候補（スコアに依存しない別枠、rank=0で先頭掲載）。
+    # ストップ高は前日比が抽出条件の上限（MAX_PRICE_CHANGE_PCT）を大きく超えるため、
+    # 通常の候補（df_filtered）には含まれない df_feat（フィルター前の全銘柄）から探す。
+    df_filtered["stop_high_pick"] = False
+    stop_high_pick = _pick_stop_high_continuation_candidate(df_feat)
+    if stop_high_pick is not None:
+        df_filtered = df_filtered[df_filtered["code"] != stop_high_pick["code"]]
+        df_filtered = pd.concat([pd.DataFrame([stop_high_pick]), df_filtered], ignore_index=True)
+        logger.info("ストップ高翌日継続候補: %s (%s)", stop_high_pick["code"], stop_high_pick["company_name"])
+
     logger.info("分析完了: 注目銘柄 %d 件", len(df_filtered))
     return df_filtered
+
+
+def _pick_stop_high_continuation_candidate(df_feat: pd.DataFrame) -> dict | None:
+    """
+    本日ストップ高だった銘柄の中から、翌日も継続しやすいと考えられる銘柄を1件選ぶ。
+    選定基準: 出来高倍率(5日平均比)が高いほど需給が強く継続しやすいと考え、
+    出来高倍率の降順、同率の場合は売買代金の降順で1件のみ選ぶ。
+    ストップ高銘柄が存在しない場合は None を返す（ランキングには掲載しない）。
+    スコアリング（total_score）には一切依存しない、別枠の注目株のため rank=0 とする。
+    """
+    candidates = df_feat[df_feat["is_stop_high"]].copy()
+    if candidates.empty:
+        return None
+
+    candidates["volume_ratio_5d"] = candidates["volume_ratio_5d"].fillna(-1)
+    candidates["trading_value"] = candidates["trading_value"].fillna(-1)
+    candidates = candidates.sort_values(
+        ["volume_ratio_5d", "trading_value"], ascending=[False, False]
+    ).reset_index(drop=True)
+
+    best = candidates.iloc[0].to_dict()
+    vol_ratio = best.get("volume_ratio_5d")
+    reason = "本日ストップ高"
+    if vol_ratio and vol_ratio > 0:
+        reason += f"（出来高{vol_ratio:.1f}倍）。翌日もストップ高が継続する可能性が高い注目株"
+    else:
+        reason += "。翌日もストップ高が継続する可能性が高い注目株"
+
+    best.update({
+        "rank": 0,
+        "reason": reason,
+        "stop_high_pick": True,
+    })
+    return best
