@@ -720,12 +720,16 @@ def main():
         logger.error("分析失敗: %s", e, exc_info=True)
         df_result = __import__("pandas").DataFrame()
 
-    # ── Step 6: watchlist 登録（抽出された全銘柄をデフォルトで登録）──
+    # ── Step 6: watchlist 登録（スコア上位5銘柄＋ストップ高翌日継続候補を登録）──
     if not df_result.empty:
         logger.info("[Step 6] watchlist 登録 (%d 件)", len(df_result))
         try:
-            from watchlist import register_watchlist
-            register_watchlist(df_result["code"].astype(str).tolist(), source="RANKING")
+            from watchlist import register_default_watchlist
+            scored_rows = df_result[df_result["rank"] >= 1].sort_values("rank")
+            scored_codes = scored_rows["code"].astype(str).tolist()
+            stop_high_rows = df_result[df_result["rank"] == 0]
+            stop_high_code = str(stop_high_rows["code"].iloc[0]) if not stop_high_rows.empty else None
+            register_default_watchlist(scored_codes, stop_high_code=stop_high_code)
         except Exception as e:
             logger.error("watchlist 登録失敗: %s", e, exc_info=True)
 

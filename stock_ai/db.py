@@ -220,6 +220,11 @@ CREATE TABLE IF NOT EXISTS watchlist (
 );
 """
 
+# watchlist に追加するカラム
+_WATCHLIST_NEW_COLS = [
+    ("slot_rank", "INTEGER"),
+]
+
 # analysis_results に追加するカラム
 _ANALYSIS_NEW_COLS = [
     ("technical_score",          "REAL"),
@@ -344,12 +349,19 @@ def _migrate_monitoring_status(conn) -> None:
         _add_column_if_missing(conn, "monitoring_status", col, typ)
 
 
+def _migrate_watchlist(conn) -> None:
+    """watchlist テーブルに不足カラムを安全に追加する"""
+    for col, typ in _WATCHLIST_NEW_COLS:
+        _add_column_if_missing(conn, "watchlist", col, typ)
+
+
 def init_db():
     with get_conn() as conn:
         conn.executescript(CREATE_TABLES_SQL)
         _migrate_analysis_results(conn)
         _migrate_trade_signals(conn)
         _migrate_monitoring_status(conn)
+        _migrate_watchlist(conn)
     logger.info("DB初期化完了: %s", DB_PATH)
 
 
@@ -788,20 +800,40 @@ def deactivate_watchlist() -> None:
     logger.info("watchlist: 全エントリーを無効化しました")
 
 
+def deactivate_watchlist_codes(codes: list[str]) -> None:
+    """指定銘柄のみ is_active=0 にする（LINE指示によるスロット単位の上書き用）"""
+    if not codes:
+        return
+    placeholders = ",".join("?" * len(codes))
+    with get_conn() as conn:
+        conn.execute(
+            f"UPDATE watchlist SET is_active = 0, updated_at = datetime('now', 'localtime') "
+            f"WHERE code IN ({placeholders})",
+            codes,
+        )
+    logger.info("watchlist: %d 件を無効化しました: %s", len(codes), codes)
+
+
 def upsert_watchlist_entries(rows: list[dict]) -> None:
-    """指定銘柄を watchlist に登録（既存コードは is_active=1 に更新）"""
+    """
+    指定銘柄を watchlist に登録（既存コードは is_active=1 に更新）。
+    slot_rank は「スコア順位1〜5」のスロット番号（ストップ高枠は None）。
+    LINE指示による上書き時、どのスロットが優先度が低い（次回上書き対象になりやすい）かを
+    判定するために使う。
+    """
     sql = """
-        INSERT INTO watchlist (code, company_name, selected_date, source, is_active, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 1, datetime('now', 'localtime'), datetime('now', 'localtime'))
+        INSERT INTO watchlist (code, company_name, selected_date, source, slot_rank, is_active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 1, datetime('now', 'localtime'), datetime('now', 'localtime'))
         ON CONFLICT(code) DO UPDATE SET
             company_name  = excluded.company_name,
             selected_date = excluded.selected_date,
             source        = excluded.source,
+            slot_rank     = excluded.slot_rank,
             is_active     = 1,
             updated_at    = datetime('now', 'localtime')
     """
     data = [
-        (r["code"], r.get("company_name"), r.get("selected_date"), r.get("source"))
+        (r["code"], r.get("company_name"), r.get("selected_date"), r.get("source"), r.get("slot_rank"))
         for r in rows
     ]
     with get_conn() as conn:
@@ -809,17 +841,21 @@ def upsert_watchlist_entries(rows: list[dict]) -> None:
     logger.info("watchlist 登録: %d 件", len(data))
 
 
-_MAX_ACTIVE_WATCHLIST = 5
+_MAX_ACTIVE_WATCHLIST = 6  # スコア上位5枠 + ストップ高翌日継続候補1枠
 
 
 def get_active_watchlist() -> list[dict]:
-    """is_active=1 の銘柄一覧を最大 _MAX_ACTIVE_WATCHLIST（5）件まで返す
-    （register_watchlist() 側で書き込み時にも5件に制限しているが、ここでも
-    読み取り時に防御的に制限する）"""
+    """
+    is_active=1 の銘柄一覧を最大 _MAX_ACTIVE_WATCHLIST（6）件まで返す。
+    スコア順位スロット（slot_rank昇順）を先に、ストップ高枠（source=STOP_HIGH）を
+    最後に並べる。
+    """
     with get_conn() as conn:
         cursor = conn.execute(
-            "SELECT code, company_name, selected_date, source FROM watchlist "
-            "WHERE is_active = 1 ORDER BY rowid LIMIT ?",
+            "SELECT code, company_name, selected_date, source, slot_rank FROM watchlist "
+            "WHERE is_active = 1 "
+            "ORDER BY (source = 'STOP_HIGH'), slot_rank IS NULL, slot_rank "
+            "LIMIT ?",
             (_MAX_ACTIVE_WATCHLIST,),
         )
         return [dict(row) for row in cursor.fetchall()]

@@ -255,7 +255,8 @@ with tabs[0]:
 # --- watchlist ---
 with tabs[1]:
     from watchlist import get_active_watchlist
-    watch_rows = get_active_watchlist()[:5]  # watchlist は最大5件（db.get_active_watchlist側でも制限済み）
+    # スコア上位5件＋ストップ高翌日継続候補1件（db.get_active_watchlist側で最大6件に制限済み）
+    watch_rows = get_active_watchlist()
     if not watch_rows:
         st.info("監視中の銘柄がありません。")
     else:

@@ -98,6 +98,134 @@ def validate_codes_in_latest_ranking(codes: list[str]) -> dict:
         return {"valid": [], "invalid": list(codes), "latest_date": None, "company_names": {}}
 
 
+_STOP_HIGH_SOURCE = "STOP_HIGH"
+_SCORED_SLOTS = 5  # スコア順位スロット数（ストップ高枠は別途+1）
+
+
+def _normalize_codes(codes: list[str]) -> list[str]:
+    """5桁J-Quantsコード（末尾0）を4桁に正規化する"""
+    return [c[:-1] if len(c) == 5 and c.isdigit() and c.endswith("0") else c for c in codes]
+
+
+def register_default_watchlist(
+    scored_codes: list[str], stop_high_code: str | None = None,
+) -> list[dict]:
+    """
+    main.py の分析実行時に呼ぶ、watchlistの全面更新（日次のデフォルト登録）。
+    スコア上位5銘柄（slot_rank=1〜5, source="RANKING"）＋ストップ高翌日継続候補
+    （slot_rank=None, source="STOP_HIGH"）の最大6件を登録する。
+    既存のwatchlist（LINE指示分も含む）は全て無効化してから登録し直す
+    （1日の分析実行ごとにリセットする想定）。
+    """
+    from db import deactivate_watchlist, upsert_watchlist_entries
+
+    scored_codes = _normalize_codes(scored_codes)[:_SCORED_SLOTS]
+    all_codes = list(scored_codes)
+    if stop_high_code:
+        stop_high_code = _normalize_codes([stop_high_code])[0]
+        if stop_high_code not in all_codes:
+            all_codes.append(stop_high_code)
+
+    result = validate_codes_in_latest_ranking(all_codes)
+    company_names = result["company_names"]
+    selected_date = result["latest_date"] or str(date.today())
+
+    deactivate_watchlist()
+
+    rows = [
+        {
+            "code": code,
+            "company_name": company_names.get(code, ""),
+            "selected_date": selected_date,
+            "source": "RANKING",
+            "slot_rank": i + 1,
+        }
+        for i, code in enumerate(scored_codes)
+    ]
+    if stop_high_code:
+        rows.append({
+            "code": stop_high_code,
+            "company_name": company_names.get(stop_high_code, ""),
+            "selected_date": selected_date,
+            "source": _STOP_HIGH_SOURCE,
+            "slot_rank": None,
+        })
+
+    upsert_watchlist_entries(rows)
+    logger.info("watchlist 登録完了（デフォルト）: %s (ストップ高枠=%s)", scored_codes, stop_high_code)
+    return rows
+
+
+def apply_line_watchlist(codes: list[str]) -> list[dict]:
+    """
+    LINE指示による監視銘柄の上書き。既存のwatchlist全体を無効化するのではなく、
+    現在アクティブな「スコア順位スロット」(1〜5) のうち優先度が低い（slot_rankが
+    大きい、または空いている）スロットから順に、指定銘柄で上書きする。
+    上書きされた銘柄は、占有したスロット番号をそのまま引き継ぐため、次にLINE指示が
+    あった際も同じ基準（スコア下位＝スロット番号が大きい方）で再度上書きされる。
+    ストップ高枠（source="STOP_HIGH"）は対象外で、常にそのまま維持される。
+    登録した銘柄の dict リストを返す（5件を超える分は先頭5件に切り捨て）。
+    """
+    from db import deactivate_watchlist_codes, get_active_watchlist, upsert_watchlist_entries
+
+    codes = _normalize_codes(codes)[:_SCORED_SLOTS]
+    if not codes:
+        return []
+
+    existing = [row for row in get_active_watchlist() if row.get("source") != _STOP_HIGH_SOURCE]
+    existing_by_rank = {row["slot_rank"]: row for row in existing if row.get("slot_rank")}
+
+    all_ranks = set(range(1, _SCORED_SLOTS + 1))
+    free_ranks = sorted(all_ranks - existing_by_rank.keys())
+    occupied_ranks_desc = sorted(existing_by_rank.keys(), reverse=True)
+
+    target_ranks: list[int] = []
+    target_ranks.extend(free_ranks)
+    for r in occupied_ranks_desc:
+        if len(target_ranks) >= len(codes):
+            break
+        target_ranks.append(r)
+    target_ranks = sorted(target_ranks[:len(codes)])
+
+    codes_to_deactivate = [existing_by_rank[r]["code"] for r in target_ranks if r in existing_by_rank]
+    if codes_to_deactivate:
+        deactivate_watchlist_codes(codes_to_deactivate)
+
+    result = validate_codes_in_latest_ranking(codes)
+    company_names = result["company_names"]
+    selected_date = result["latest_date"] or str(date.today())
+
+    rows = [
+        {
+            "code": code,
+            "company_name": company_names.get(code, ""),
+            "selected_date": selected_date,
+            "source": "LINE",
+            "slot_rank": rank,
+        }
+        for code, rank in zip(codes, target_ranks)
+    ]
+    upsert_watchlist_entries(rows)
+    logger.info("watchlist 上書き完了（LINE）: %s (スロット=%s)", codes, target_ranks)
+    return rows
+
+
+def get_watchlist_status() -> dict:
+    """
+    現在アクティブな監視銘柄一覧（スコア順位スロット最大5件＋ストップ高枠）を返す。
+    LINEの「監視リスト」コマンドへの応答に使う。
+
+    Returns:
+        dict: {"scored": [...], "stop_high": dict | None}
+    """
+    from db import get_active_watchlist
+
+    rows = get_active_watchlist()
+    scored = [r for r in rows if r.get("source") != _STOP_HIGH_SOURCE]
+    stop_high = next((r for r in rows if r.get("source") == _STOP_HIGH_SOURCE), None)
+    return {"scored": scored, "stop_high": stop_high}
+
+
 def register_watchlist(codes: list[str], source: str = "LINE") -> list[dict]:
     """
     既存のアクティブ監視銘柄を全て無効化し、指定銘柄を is_active=1 で登録する。
@@ -155,6 +283,7 @@ def get_top_ranked_codes(limit: int = 5) -> list[str]:
 
     analysis_results.code は J-Quants の5桁表記（末尾0）のため、4桁に正規化して返す
     （正規化しないと intraday_monitor.code_to_ticker() が誤ったティッカーを組み立てる）。
+    rank=0（ストップ高翌日継続候補、スコアに依存しない別枠）は対象外とする。
     """
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -166,7 +295,7 @@ def get_top_ranked_codes(limit: int = 5) -> list[str]:
             return []
 
         rows = conn.execute(
-            "SELECT code FROM analysis_results WHERE date = ? ORDER BY rank ASC LIMIT ?",
+            "SELECT code FROM analysis_results WHERE date = ? AND rank >= 1 ORDER BY rank ASC LIMIT ?",
             (latest_date, limit),
         ).fetchall()
         conn.close()

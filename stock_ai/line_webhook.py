@@ -43,8 +43,9 @@ from config import (
     is_trading_day,
 )
 from watchlist import (
+    apply_line_watchlist,
+    get_watchlist_status,
     parse_watch_codes,
-    register_watchlist,
     validate_codes_in_latest_ranking,
 )
 
@@ -251,6 +252,40 @@ def _handle_resume_command(text: str, reply_token: str) -> None:
     _reply(reply_token, "\n".join(lines))
 
 
+def _is_watchlist_status_command(text: str) -> bool:
+    """テキストが監視リスト確認コマンドかどうかを判定する（例: 監視リスト / watchlist）"""
+    lower = text.strip().lower()
+    return lower in ("監視リスト", "watchlist", "watch list")
+
+
+def _handle_watchlist_status_command(reply_token: str) -> None:
+    """
+    現在アクティブな監視銘柄（スコア順位スロット最大5件＋ストップ高翌日継続候補）を
+    LINEに返信する。
+    """
+    status = get_watchlist_status()
+    scored = status["scored"]
+    stop_high = status["stop_high"]
+
+    lines = ["【現在の監視銘柄】"]
+    if scored:
+        for row in scored:
+            name = row.get("company_name") or ""
+            source_label = "LINE指定" if row.get("source") == "LINE" else "ランキング"
+            lines.append(f"{row['slot_rank']}. {row['code']} {name}（{source_label}）".strip())
+    else:
+        lines.append("（なし）")
+
+    lines.append("")
+    if stop_high:
+        name = stop_high.get("company_name") or ""
+        lines.append(f"ストップ高翌日継続候補: {stop_high['code']} {name}".strip())
+    else:
+        lines.append("ストップ高翌日継続候補: なし")
+
+    _reply(reply_token, "\n".join(lines))
+
+
 def _handle_text_message(text: str, reply_token: str) -> None:
     """テキストメッセージを処理して watchlist 登録・返信を行う"""
     if not _is_watch_command(text):
@@ -281,8 +316,8 @@ def _handle_text_message(text: str, reply_token: str) -> None:
         _reply(reply_token, "\n".join(lines))
         return
 
-    # watchlist に登録
-    register_watchlist(valid_codes, source="LINE")
+    # watchlist に登録（既存のスコア下位スロットから上書き。ストップ高枠は維持される）
+    apply_line_watchlist(valid_codes)
 
     # 取引時間内であれば5分足監視をバックグラウンドで即時起動する
     # （Webhookの応答はこの完了を待たない。取引時間外は次回の定期実行まで待つ）
@@ -291,7 +326,7 @@ def _handle_text_message(text: str, reply_token: str) -> None:
         _trigger_intraday_monitoring(valid_codes)
 
     # 正常返信
-    lines = ["監視対象を登録しました。"]
+    lines = ["監視対象を更新しました（スコア下位の銘柄から上書き）。"]
     for code in valid_codes:
         name = company_names.get(code, "")
         lines.append(f"{code} {name}".strip())
@@ -336,7 +371,9 @@ def callback():
         reply_token = event.get("replyToken", "")
         if text and reply_token:
             try:
-                if _is_resume_command(text):
+                if _is_watchlist_status_command(text):
+                    _handle_watchlist_status_command(reply_token)
+                elif _is_resume_command(text):
                     _handle_resume_command(text, reply_token)
                 else:
                     _handle_text_message(text, reply_token)
