@@ -252,6 +252,7 @@ _ANALYSIS_NEW_COLS = [
     ("market_change_pct",        "REAL"),
     ("market_sentiment_score",   "REAL"),
     ("market_sentiment_reason",  "TEXT"),
+    ("baseline_score",           "REAL"),
 ]
 
 # trade_signals に追加するカラム
@@ -418,8 +419,9 @@ def upsert_analysis_results(rows: list[dict]):
          earnings_data_status, fundamental_data_status, reason,
          earnings_within_30d, upward_revision, op_profit_growth_50, dividend_increase,
          consecutive_up_days, risk_penalty_score, risk_penalty_reason,
-         market_sentiment, market_change_pct, market_sentiment_score, market_sentiment_reason)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         market_sentiment, market_change_pct, market_sentiment_score, market_sentiment_reason,
+         baseline_score)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """
     data = [
         (r["code"], r["date"], r.get("company_name"), r.get("close"),
@@ -439,7 +441,8 @@ def upsert_analysis_results(rows: list[dict]):
          r.get("op_profit_growth_50"), r.get("dividend_increase"),
          r.get("consecutive_up_days"), r.get("risk_penalty_score"), r.get("risk_penalty_reason"),
          r.get("market_sentiment"), r.get("market_change_pct"),
-         r.get("market_sentiment_score"), r.get("market_sentiment_reason"))
+         r.get("market_sentiment_score"), r.get("market_sentiment_reason"),
+         r.get("baseline_score"))
         for r in rows
     ]
     with get_conn() as conn:

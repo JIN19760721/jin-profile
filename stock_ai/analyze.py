@@ -1,16 +1,22 @@
 """
 注目銘柄の分析ロジック。
 
-スコア構成（基本加点は最大170点、過熱/連続上昇/地合いによる調整あり）:
-  テクニカル          25点
-  出来高・資金流入    35点
-  決算モメンタム      90点  ← EDINET取得不可時 0点（fundamental_score.py）
-  ファンダメンタル    20点  ← fundamentals テーブルに無ければEDINETから自動算出
-                            （fundamentals_fetcher.py）、それでも取得不可時 0点
+baseline_score（テクニカル25点 + 出来高・資金流入35点、最大60点）を
+検証済みのベースラインとして固定し、それ以外の要素は config.SCORE_WEIGHT_*
+（デフォルト0）で重み付けして total_score に反映する。
 
-リスク調整（ランキング検証で確認された「当日急騰ほど翌日下落しやすい」傾向への対策）:
-  過熱・連続上昇ペナルティ（config.OVERHEAT_*, CONSECUTIVE_UP_DAYS_*）  最大-23点
-  地合い（市場全体の前日比）による加減点（config.MARKET_SENTIMENT_*）  ±10点
+  baseline_score = テクニカル(最大25点) + 出来高・資金流入(最大35点)
+  total_score    = baseline_score
+                  + ファンダメンタル(最大20点、PER/PBR/ROE等。検証済みのため重み1固定)
+                  + SCORE_WEIGHT_EARNINGS_MOMENTUM   × 決算モメンタム(最大90点、EDINET)
+                  + SCORE_WEIGHT_RISK_PENALTY        × 過熱・連続上昇ペナルティ(最大-23点)
+                  + SCORE_WEIGHT_MARKET_SENTIMENT    × 地合いスコア(±10点)
+
+決算モメンタム・過熱ペナルティ・地合いは1日分の診断から実装したが、
+--validate-ranking-all による複数日検証では翌日リターンとの正の相関が
+確認できなかったため、SCORE_WEIGHT_* を0にしてランキングへの影響を止めている
+（スコア自体は分析結果に保存され続けるため、データ収集とランキングへの反映を分離できる）。
+採用ルール・重みを戻す条件は README.md「スコア要素の採用ルール」を参照。
 """
 
 import logging
@@ -29,6 +35,7 @@ from config import (
     MARKET_SENTIMENT_SYMBOLS,
     MARKET_SENTIMENT_WEAK_PCT,
     MAX_PRICE,
+    MAX_PRICE_CHANGE_PCT,
     MIN_PRICE,
     MIN_PRICE_CHANGE_PCT,
     MIN_TURNOVER,
@@ -37,6 +44,9 @@ from config import (
     OVERHEAT_CHANGE_PCT_MID,
     OVERHEAT_PENALTY_HIGH,
     OVERHEAT_PENALTY_MID,
+    SCORE_WEIGHT_EARNINGS_MOMENTUM,
+    SCORE_WEIGHT_MARKET_SENTIMENT,
+    SCORE_WEIGHT_RISK_PENALTY,
 )
 from fundamental_score import compute_fundamental_score
 from fundamentals_fetcher import compute_fundamentals
@@ -453,7 +463,7 @@ def _apply_filters(df: pd.DataFrame) -> pd.DataFrame:
 
     mask = (
         df["close"].between(MIN_PRICE, MAX_PRICE)
-        & (df["change_pct"].fillna(0) >= MIN_PRICE_CHANGE_PCT)
+        & df["change_pct"].fillna(0).between(MIN_PRICE_CHANGE_PCT, MAX_PRICE_CHANGE_PCT)
         & (df["volume_ratio_5d"].fillna(0) >= MIN_VOLUME_RATIO)
         & (df["trading_value"].fillna(0) >= MIN_TURNOVER)
     )
@@ -531,13 +541,17 @@ def run_analysis(target_date: str | None = None) -> pd.DataFrame:
         fundamental_data = _get_fundamental_data(code, fundamental_cache)
         fds, f_st = _score_fundamental(fundamental_data)
         ems = earnings_result["score"]
+        baseline_score = round(row["technical_score"] + row["volume_flow_score"], 2)
         total = round(
-            row["technical_score"] + row["volume_flow_score"] + ems + fds
-            + row["risk_penalty_score"] + market_sentiment_score,
+            baseline_score + fds
+            + SCORE_WEIGHT_EARNINGS_MOMENTUM * ems
+            + SCORE_WEIGHT_RISK_PENALTY * row["risk_penalty_score"]
+            + SCORE_WEIGHT_MARKET_SENTIMENT * market_sentiment_score,
             2,
         )
 
         row.update({
+            "baseline_score":          baseline_score,
             "earnings_momentum_score": ems,
             "fundamental_score":       fds,
             "market_sentiment_score":  market_sentiment_score,

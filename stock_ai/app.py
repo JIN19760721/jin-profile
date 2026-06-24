@@ -240,6 +240,7 @@ with tabs[0]:
         df_rank_display = df_rank.rename(columns={
             "technical_score":         "テクニカル点",
             "volume_flow_score":       "出来高点",
+            "baseline_score":          "ベースライン点(検証済み)",
             "earnings_momentum_score": "決算モメンタム点",
             "fundamental_score":       "ファンダメンタル点",
             "consecutive_up_days":     "連続上昇日数",
@@ -406,7 +407,7 @@ with tabs[6]:
 
             score_col = st.selectbox(
                 "スコア帯別の的中率を確認する要素",
-                ["earnings_momentum_score", "technical_score", "volume_flow_score",
+                ["baseline_score", "earnings_momentum_score", "technical_score", "volume_flow_score",
                  "fundamental_score", "risk_penalty_score", "market_sentiment_score"],
             )
             band_df = summarize_by_score_band(df_all, score_col)

@@ -41,7 +41,7 @@ def next_business_day(d: date) -> date:
 
 
 _SCORE_BREAKDOWN_COLS = [
-    "technical_score", "volume_flow_score", "earnings_momentum_score", "fundamental_score",
+    "baseline_score", "technical_score", "volume_flow_score", "earnings_momentum_score", "fundamental_score",
     "risk_penalty_score", "market_sentiment_score", "consecutive_up_days", "change_pct",
     "earnings_within_30d", "upward_revision", "op_profit_growth_50", "dividend_increase",
 ]

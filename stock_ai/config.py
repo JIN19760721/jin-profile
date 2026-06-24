@@ -225,6 +225,8 @@ MARKET_SYMBOLS = {
 MIN_PRICE = 10            # 最低終値（円）
 MAX_PRICE = 200000        # 最高終値（円）
 MIN_PRICE_CHANGE_PCT = 3.0  # 最低前日比（%）
+MAX_PRICE_CHANGE_PCT = 10.0  # 最高前日比（%）。これを超える「既に跳ねた」銘柄は
+                              # 母集団から除外する（翌日リバーサルしやすいため）
 MIN_VOLUME_RATIO = 2.0    # 出来高/5日平均の最低倍率
 MIN_TURNOVER = 50_000_000   # 最低売買代金（5000万円）
 
@@ -234,12 +236,27 @@ MARKET_SENTIMENT_STRONG_PCT = 1.0
 MARKET_SENTIMENT_WEAK_PCT = -1.0
 
 # 過熱・連続上昇リスク調整（ランキングの的中率向上のため。翌日リバーサルしやすい
-# 「当日大幅上昇済み」「連続上昇日数が長い」銘柄のスコアを減点する）
-OVERHEAT_CHANGE_PCT_HIGH = 20.0   # 前日比この%以上で強めに減点
-OVERHEAT_CHANGE_PCT_MID = 12.0    # 前日比この%以上で軽めに減点
+# 「当日大幅上昇済み」「連続上昇日数が長い」銘柄のスコアを減点する）。
+# MAX_PRICE_CHANGE_PCT（抽出条件の上限）導入後も母集団内で意味のある差が出るよう、
+# 閾値は MAX_PRICE_CHANGE_PCT 以下の範囲に設定している。
+OVERHEAT_CHANGE_PCT_HIGH = 8.5    # 前日比この%以上で強めに減点
+OVERHEAT_CHANGE_PCT_MID = 6.0     # 前日比この%以上で軽めに減点
 OVERHEAT_PENALTY_HIGH = -15.0
 OVERHEAT_PENALTY_MID = -7.0
 CONSECUTIVE_UP_DAYS_THRESHOLD = 4  # 連続上昇日数がこれ以上で減点
 CONSECUTIVE_UP_DAYS_PENALTY = -8.0
 MARKET_SENTIMENT_BAD_PENALTY = -10.0   # 地合いが「悪い」日の減点
 MARKET_SENTIMENT_STRONG_BONUS = 5.0    # 地合いが「強い」日の加点
+
+# 未検証スコア要素の重み（total_score への反映度）。
+# 決算モメンタム・地合い・過熱ペナルティは、1日分の診断から実装したが
+# 複数日（--validate-ranking-all）の検証では翌日リターンとの正の相関が
+# 確認できていない（むしろ負の相関が出た）ため、ランキング順位への影響を
+# 一時的にゼロにしている。各スコア自体は分析結果に保存され続けるため、
+# データ収集とランキングへの反映を分離できる。
+#
+# 採用ルール: 最低15〜20営業日分の --validate-ranking-all で当該スコア要素が
+# 翌日リターンと安定して正の相関を示すことを確認してから 1.0 に戻すこと。
+SCORE_WEIGHT_EARNINGS_MOMENTUM = 0.0
+SCORE_WEIGHT_MARKET_SENTIMENT = 0.0
+SCORE_WEIGHT_RISK_PENALTY = 0.0
