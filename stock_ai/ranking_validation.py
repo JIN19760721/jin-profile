@@ -53,7 +53,7 @@ def get_ranking_for_date(target_date: str) -> pd.DataFrame:
     cols = ", ".join(_SCORE_BREAKDOWN_COLS)
     df = pd.read_sql_query(
         f"""
-        SELECT rank, code, company_name, total_score, {cols}
+        SELECT rank, code, company_name, close, total_score, {cols}
         FROM analysis_results
         WHERE date = ?
         ORDER BY rank ASC
@@ -206,6 +206,14 @@ def validate_ranking(target_date: str) -> pd.DataFrame:
         max_drawdown_pct = round((next_low - entry_price) / entry_price * 100, 2)
         close_return_pct = round((next_close - entry_price) / entry_price * 100, 2)
 
+        # ランキング日の終値→翌営業日始値のギャップ（%）。前日の急騰が既に
+        # 翌日の始値に織り込まれている（寄り付きで跳ねてしまっている）かどうかを見る。
+        ranking_day_close = r.get("close")
+        gap_pct = (
+            round((next_open - ranking_day_close) / ranking_day_close * 100, 2)
+            if ranking_day_close else None
+        )
+
         avg_volume = _get_avg_volume(code, next_date)
         volume_ratio = round(next_volume / avg_volume, 2) if (avg_volume and next_volume) else None
 
@@ -216,6 +224,7 @@ def validate_ranking(target_date: str) -> pd.DataFrame:
             "entry_price_source": entry_price_source,
             "company_name":      r.get("company_name"),
             "total_score":       r.get("total_score"),
+            "gap_pct":           gap_pct,
             "next_open":         round(float(next_open), 2),
             "next_high":         round(float(next_high), 2),
             "next_low":          round(float(next_low), 2),
@@ -251,6 +260,37 @@ def correlation_summary(df_validation: pd.DataFrame, target_col: str = "close_re
     numeric_df = df_validation[[*candidate_cols, target_col]].apply(pd.to_numeric, errors="coerce")
     corr = numeric_df.corr()[target_col].drop(target_col, errors="ignore")
     return corr.dropna().sort_values(ascending=False)
+
+
+def analyze_gap_hypothesis(df_validation: pd.DataFrame) -> dict:
+    """
+    「ランキング日の急騰は、翌日の始値に既に織り込まれている（寄り付きで跳ねてから
+    システムが動き出すため、エントリー時点で出遅れている）」という仮説を検証する。
+
+    - change_pct_vs_gap: ランキング日の前日比(change_pct)と翌日始値ギャップ(gap_pct)の
+      相関。正の相関が強いほど「当日の急騰が大きいほど翌日の始値も大きく跳ねる
+      （＝動きが翌朝の寄り付きに先に織り込まれる）」ことを示す。
+    - gap_vs_return: 翌日始値ギャップ(gap_pct)とエントリー後のリターン(close_return_pct)
+      の相関。負の相関が強いほど「ギャップが大きいほど、その後の戻りが悪い
+      （＝ギャップを買うと損をしやすい）」ことを示す。
+    - avg_gap_pct: 翌日始値ギャップの平均値（参考値）。
+
+    十分なデータが無い場合は値が None になる。
+    """
+    result = {"change_pct_vs_gap": None, "gap_vs_return": None, "avg_gap_pct": None, "n": len(df_validation)}
+    if df_validation.empty or "gap_pct" not in df_validation.columns:
+        return result
+
+    df = df_validation[["change_pct", "gap_pct", "close_return_pct"]].apply(pd.to_numeric, errors="coerce").dropna()
+    if df.empty:
+        return result
+
+    result["avg_gap_pct"] = round(float(df["gap_pct"].mean()), 2)
+    if len(df) >= 2:
+        corr = df.corr()
+        result["change_pct_vs_gap"] = round(float(corr.loc["change_pct", "gap_pct"]), 4)
+        result["gap_vs_return"] = round(float(corr.loc["gap_pct", "close_return_pct"]), 4)
+    return result
 
 
 def summarize_by_score_band(df_validation: pd.DataFrame, score_col: str) -> pd.DataFrame:

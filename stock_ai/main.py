@@ -460,7 +460,7 @@ def run_validate_ranking_all_mode(args, logger):
     from db import init_db
     init_db()
 
-    from ranking_validation import correlation_summary, validate_ranking_range
+    from ranking_validation import analyze_gap_hypothesis, correlation_summary, validate_ranking_range
     df_validation = validate_ranking_range(args.start_date, args.end_date)
 
     if df_validation.empty:
@@ -470,8 +470,16 @@ def run_validate_ranking_all_mode(args, logger):
     corr = correlation_summary(df_validation)
     logger.info("スコア要素と翌日リターンの相関係数:\n%s", corr.to_string())
 
+    gap_result = analyze_gap_hypothesis(df_validation)
+    logger.info(
+        "ギャップ仮説検証: 当日急騰→翌日ギャップ相関=%s, ギャップ→その後リターン相関=%s, "
+        "平均ギャップ=%s%% (n=%s)",
+        gap_result["change_pct_vs_gap"], gap_result["gap_vs_return"],
+        gap_result["avg_gap_pct"], gap_result["n"],
+    )
+
     from export_excel import export_ranking_validation_range_excel
-    out_path = export_ranking_validation_range_excel(df_validation, corr)
+    out_path = export_ranking_validation_range_excel(df_validation, corr, gap_result)
     logger.info("複数日ランキング検証結果出力先: %s", out_path)
 
     logger.info("=" * 60)

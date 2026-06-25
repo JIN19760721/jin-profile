@@ -391,7 +391,12 @@ with tabs[6]:
     st.divider()
     st.caption("保存済みの全日付分のランキングをまとめて検証し、スコア要素ごとの有効性（翌日リターンとの相関）を確認します。")
     if st.button("全期間まとめて検証"):
-        from ranking_validation import correlation_summary, summarize_by_score_band, validate_ranking_range
+        from ranking_validation import (
+            analyze_gap_hypothesis,
+            correlation_summary,
+            summarize_by_score_band,
+            validate_ranking_range,
+        )
         with st.spinner("複数日検証中..."):
             df_all = validate_ranking_range()
         if df_all.empty:
@@ -406,6 +411,14 @@ with tabs[6]:
             corr = correlation_summary(df_all)
             st.dataframe(corr.rename("相関係数").reset_index().rename(columns={"index": "スコア要素"}),
                          use_container_width=True, hide_index=True)
+
+            st.write("**ギャップ仮説検証**（当日の急騰が翌日の始値に織り込まれているか）")
+            gap_result = analyze_gap_hypothesis(df_all)
+            st.write(
+                f"当日急騰→翌日ギャップ相関: {gap_result['change_pct_vs_gap']} / "
+                f"ギャップ→その後リターン相関: {gap_result['gap_vs_return']} / "
+                f"平均ギャップ: {gap_result['avg_gap_pct']}% (n={gap_result['n']})"
+            )
 
             score_col = st.selectbox(
                 "スコア帯別の的中率を確認する要素",

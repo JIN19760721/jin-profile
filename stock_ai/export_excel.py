@@ -642,6 +642,7 @@ def _write_ranking_validation(wb, df: pd.DataFrame):
         "total_score":       "総合スコア",
         "entry_price":       "エントリー価格",
         "entry_price_source": "エントリー価格の種類",
+        "gap_pct":           "翌日始値ギャップ(%)",
         "next_open":         "翌日始値",
         "next_high":         "翌日高値",
         "next_low":          "翌日安値",
@@ -688,6 +689,7 @@ def _write_ranking_validation_all(wb, df: pd.DataFrame):
         "market_sentiment_score": "地合いスコア",
         "entry_price":       "エントリー価格",
         "entry_price_source": "エントリー価格の種類",
+        "gap_pct":           "翌日始値ギャップ(%)",
         "next_open":         "翌日始値",
         "next_close":        "翌日終値",
         "max_gain_pct":      "最大上昇率(%)",
@@ -709,15 +711,38 @@ def _write_score_correlation(wb, corr: pd.Series):
     logger.info("スコア要素の有効性シート出力完了: %d 項目", len(corr))
 
 
-def export_ranking_validation_range_excel(df_validation: pd.DataFrame, corr: pd.Series) -> Path:
+def _write_gap_hypothesis(wb, gap_result: dict):
+    ws = wb.create_sheet("ギャップ仮説検証")
+    ws.append(["項目", "値", "説明"])
+    _style_header(ws, _C["report"], 3)
+    ws.append([
+        "当日急騰→翌日始値ギャップ 相関係数", gap_result.get("change_pct_vs_gap"),
+        "正の相関が強いほど、当日の急騰が翌日の始値に織り込まれている（出遅れ）ことを示す",
+    ])
+    ws.append([
+        "翌日始値ギャップ→その後リターン 相関係数", gap_result.get("gap_vs_return"),
+        "負の相関が強いほど、ギャップを買うとその後の戻りが悪いことを示す",
+    ])
+    ws.append(["翌日始値ギャップの平均(%)", gap_result.get("avg_gap_pct"), ""])
+    ws.append(["サンプル数", gap_result.get("n"), ""])
+    _auto_width(ws)
+    logger.info("ギャップ仮説検証シート出力完了")
+
+
+def export_ranking_validation_range_excel(
+    df_validation: pd.DataFrame, corr: pd.Series, gap_result: dict | None = None,
+) -> Path:
     """
-    複数日分のランキング検証結果と、スコア要素ごとの相関係数を Excel に出力する。
+    複数日分のランキング検証結果、スコア要素ごとの相関係数、ギャップ仮説検証結果を
+    Excel に出力する。
     """
     import openpyxl
     wb = openpyxl.Workbook()
     wb.remove(wb.active)
 
     _write_score_correlation(wb, corr)
+    if gap_result is not None:
+        _write_gap_hypothesis(wb, gap_result)
     _write_ranking_validation_all(wb, df_validation)
 
     out_path = EXCEL_DIR / "ranking_validation_all.xlsx"
