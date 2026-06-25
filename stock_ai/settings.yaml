@@ -4,7 +4,8 @@
 
 trade_decision:
   stop_loss_pct: -2                      # 損切りライン（%）。これ以下が2本連続でSTOP_LOSS
-  take_profit_pct: 5                     # 利確ライン（%）。これ以上が2本連続でTAKE_PROFIT
+  take_profit_pct: 5                     # 利確ライン（%）。到達後はトレーリングストップ監視に切り替わる
+  take_profit_trail_pct: 2                # 利確ライン到達後、当日ピーク損益率からこのpt以上戻したらTAKE_PROFIT確定
   bar_change_strong_pct: 4                # 急騰・急落判定（%）。5分足1本の変化率がこれ以上/以下でWATCH_STRONG
   abnormal_volume_ratio: 5                # 出来高急増倍率。直近出来高が6本平均のこの倍数以上でWATCH_STRONG
   confirm_bars: 2                         # STOP_LOSS/TAKE_PROFIT確定に必要な連続本数

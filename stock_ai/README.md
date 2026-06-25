@@ -449,6 +449,24 @@ python main.py --intraday --codes 7203 3778 --entry-mode manual --notify-line
   （5分足データ・損益計算・デイトレ判定・シグナル変化履歴・買い候補変化履歴・
   売買判断変化履歴の各シート）に出力されます
 
+### 利益確定のトレーリングストップ
+
+利確ライン（`take_profit_pct`、デフォルト+5%）に到達しても、**その場で即座にTAKE_PROFITを
+確定しません**。さらに伸びる可能性があるため、到達後は当日のピーク損益率（5分足終値ベース）を
+追跡する「トレーリング監視」に切り替わります。
+
+- ピークからの戻りが `take_profit_trail_pct`（デフォルト2pt）未満: `signal=WATCH`
+  として保留し、伸びを待つ（reasonに「利益確定ライン到達（ピーク+X%、現在+Y%）。
+  伸び期待のため利益確定を保留中」と表示）
+- ピークからの戻りが `take_profit_trail_pct` 以上: その時点で**即時** `TAKE_PROFIT` を
+  確定する（戻り自体が確認材料のため、通常の2本連続確認は不要）
+
+なお、VWAP割れ・前日安値割れ・寄り付き30分安値割れ・ATR損切りラインのいずれかに
+該当した場合は、損益がプラスでもこのトレーリング監視より優先して `STOP_LOSS` 側で
+判定されます（利確ライン到達後でも、それらのリスク管理ルールは変わりません）。
+
+`take_profit_trail_pct` は `settings.yaml` で変更できます。
+
 ### 監視対象の選定優先順位
 
 `--intraday` の対象銘柄は以下の優先順位で決まります（`main.py` の `run_intraday_mode()`）。
@@ -520,10 +538,11 @@ ENTRY_SCOREが高く、VWAP上、出来高急増が継続しているためBUY
 | セクション.キー | 内容 | デフォルト |
 |---|---|---|
 | `trade_decision.stop_loss_pct` | 損切りライン（%） | -2 |
-| `trade_decision.take_profit_pct` | 利確ライン（%） | 5 |
+| `trade_decision.take_profit_pct` | 利確ライン（%）。到達後はトレーリング監視に切り替わる | 5 |
+| `trade_decision.take_profit_trail_pct` | 利確ライン到達後、ピークからこのpt以上戻したらTAKE_PROFIT確定 | 2 |
 | `trade_decision.bar_change_strong_pct` | 急騰・急落判定（%） | 4 |
 | `trade_decision.abnormal_volume_ratio` | 出来高急増倍率 | 5 |
-| `trade_decision.confirm_bars` | STOP_LOSS/TAKE_PROFIT確定に必要な連続本数 | 2 |
+| `trade_decision.confirm_bars` | STOP_LOSS確定に必要な連続本数（TAKE_PROFITはトレーリング監視のため対象外） | 2 |
 | `trade_decision.volume_decline_ratio` | 出来高減少フラグ判定比率 | 0.7 |
 | `trade_decision.volume_surge_continuation_ratio` | 出来高急増継続判定比率 | 1.5 |
 | `trade_decision.volume_fading_ratio` | 出来高失速判定比率 | 0.7 |

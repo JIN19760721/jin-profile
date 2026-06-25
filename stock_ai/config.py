@@ -47,6 +47,7 @@ _SETTINGS_DEFAULTS = {
     "trade_decision": {
         "stop_loss_pct":                   -2,
         "take_profit_pct":                 5,
+        "take_profit_trail_pct":           2,
         "bar_change_strong_pct":           4,
         "abnormal_volume_ratio":           5,
         "confirm_bars":                    2,
@@ -121,6 +122,7 @@ _TD = _SETTINGS["trade_decision"]
 
 STOP_LOSS_PCT = _TD["stop_loss_pct"]
 TAKE_PROFIT_PCT = _TD["take_profit_pct"]
+TAKE_PROFIT_TRAIL_PCT = _TD["take_profit_trail_pct"]
 BAR_CHANGE_STRONG_PCT = _TD["bar_change_strong_pct"]
 ABNORMAL_VOLUME_RATIO = _TD["abnormal_volume_ratio"]
 CONFIRM_BARS = _TD["confirm_bars"]

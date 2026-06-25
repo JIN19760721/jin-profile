@@ -9,9 +9,18 @@
   になる前に WATCH_STRONG として強い警戒を出す（売買確定ではない）。
 
 2本連続確認:
-  STOP_LOSS（損益率 / VWAP割れ / 前日安値割れ / 寄り付き30分安値割れ）/
-  TAKE_PROFIT は、同じ条件が2本連続した場合のみ確定する。
-  1本目は WATCH（確認待ち）として保留する。
+  STOP_LOSS（損益率 / VWAP割れ / 前日安値割れ / 寄り付き30分安値割れ）は、
+  同じ条件が2本連続した場合のみ確定する。1本目は WATCH（確認待ち）として保留する。
+
+利益確定のトレーリングストップ（2本連続確認の対象外）:
+  損益率が+5%（TAKE_PROFIT_PCT）に到達した時点で即確定せず、その後の当日ピーク
+  損益率（5分足の終値ベース）を追跡する「トレーリング監視」に切り替える。
+  - ピークからの戻りが TAKE_PROFIT_TRAIL_PCT（デフォルト2pt）未満: WATCH
+    （伸び期待のため利益確定を保留、reasonにピーク値を明示）
+  - ピークからの戻りが TAKE_PROFIT_TRAIL_PCT 以上: その時点で即時 TAKE_PROFIT 確定
+    （トレーリングの戻り自体が確認材料のため、追加の2本確認は不要）
+  なお VWAP割れ・前日安値割れ等の他のSTOP_LOSS系条件は本トレーリング監視より
+  優先され、それらに該当する場合は従来通り STOP_LOSS 側で判定される。
 
 前日高値・前日安値:
   - current_price > previous_high: 上昇継続材料として STAY 寄り（reason で明示）
@@ -56,6 +65,7 @@ from config import (
     OPENING_RANGE_START as _OPENING_RANGE_START,
     STOP_LOSS_PCT as _STOP_LOSS_PROFIT_PCT,
     TAKE_PROFIT_PCT as _TAKE_PROFIT_PROFIT_PCT,
+    TAKE_PROFIT_TRAIL_PCT as _TAKE_PROFIT_TRAIL_PCT,
     VOLUME_DECLINE_RATIO as _VOLUME_DECLINE_RATIO,
     VOLUME_FADING_RATIO as _VOLUME_FADING_RATIO,
     VOLUME_SURGE_CONTINUATION_RATIO as _VOLUME_SURGE_CONTINUATION_RATIO,
@@ -78,7 +88,6 @@ _RAW_CONDITION_CONFIRMED = {
     "prev_low_break":    ("STOP_LOSS",   "前日安値割れが2本連続したため損切り"),
     "opening_low_break": ("STOP_LOSS",   "寄り付き30分安値割れが2本連続したため損切り"),
     "atr_stop_break":    ("STOP_LOSS",   "ATR損切りライン割れが2本連続したため損切り"),
-    "profit_take":       ("TAKE_PROFIT", f"+{_TAKE_PROFIT_PROFIT_PCT}%以上が2本連続したため利益確定"),
 }
 
 _RAW_CONDITION_PENDING_REASON = {
@@ -87,7 +96,6 @@ _RAW_CONDITION_PENDING_REASON = {
     "prev_low_break":    "前日安値割れのため確認中（1本目）",
     "opening_low_break": "寄り付き30分安値割れのため確認中（1本目）",
     "atr_stop_break":    "ATR損切りライン割れのため確認中（1本目）",
-    "profit_take":       f"損益率が+{_TAKE_PROFIT_PROFIT_PCT}%以上のため確認中（1本目）",
 }
 
 
@@ -196,8 +204,13 @@ def _raw_condition(
     breakdown_prev_low_flag: bool,
     opening_range_breakdown: bool,
     atr_stop_loss_flag: bool,
+    peak_profit_pct: float | None = None,
 ) -> str | None:
-    """STOP_LOSS / TAKE_PROFIT の確定対象となる生条件（2本連続確認用）を判定する"""
+    """
+    STOP_LOSS の確定対象となる生条件（2本連続確認用）、または利益確定の
+    トレーリング監視状態（profit_trail_watch / profit_trail_stop）を判定する。
+    peak_profit_pct 未指定時は利益確定トレーリングの判定を行わない（後方互換）。
+    """
     if profit_pct <= _STOP_LOSS_PROFIT_PCT:
         return "loss"
     if current_price < vwap:
@@ -208,8 +221,10 @@ def _raw_condition(
         return "opening_low_break"
     if atr_stop_loss_flag:
         return "atr_stop_break"
-    if profit_pct >= _TAKE_PROFIT_PROFIT_PCT:
-        return "profit_take"
+    if peak_profit_pct is not None and peak_profit_pct >= _TAKE_PROFIT_PROFIT_PCT:
+        if peak_profit_pct - profit_pct >= _TAKE_PROFIT_TRAIL_PCT:
+            return "profit_trail_stop"
+        return "profit_trail_watch"
     return None
 
 
@@ -242,13 +257,33 @@ def decide_signal(
     atr_near_flag: bool,
     atr_stop_available: bool,
     vwap_near_flag: bool,
+    peak_profit_pct: float | None = None,
 ) -> tuple[str, str, str]:
     """
     優先順位 WATCH_STRONG > STOP_LOSS > TAKE_PROFIT > WATCH > STAY で
     (signal, reason, signal_strength) を返す。
+
+    利益確定（TAKE_PROFIT）はトレーリングストップ方式: raw_condition が
+    "profit_trail_stop"（ピークから _TAKE_PROFIT_TRAIL_PCT 以上戻した）であれば
+    2本連続確認を待たずに即時 TAKE_PROFIT を確定する。"profit_trail_watch"
+    （利確ライン到達後、まだ戻りが小さい）の間は WATCH として保留し、伸びを待つ。
     """
     if bar_change_pct >= _BAR_CHANGE_STRONG_PCT or bar_change_pct <= -_BAR_CHANGE_STRONG_PCT or abnormal_volume_flag:
         return "WATCH_STRONG", _watch_strong_reason(bar_change_pct, abnormal_volume_flag), "STRONG"
+
+    if raw_condition == "profit_trail_stop":
+        reason = (
+            f"利益確定ライン到達後、ピーク+{peak_profit_pct:.1f}%から"
+            f"{peak_profit_pct - profit_pct:.1f}pt戻したため利益確定"
+        )
+        return "TAKE_PROFIT", reason, "CONFIRMED"
+
+    if raw_condition == "profit_trail_watch":
+        reason = (
+            f"利益確定ライン到達（ピーク+{peak_profit_pct:.1f}%、現在+{profit_pct:.1f}%）。"
+            "伸び期待のため利益確定を保留中"
+        )
+        return "WATCH", reason, "NONE"
 
     if raw_condition is not None:
         if confirmation_count >= _CONFIRM_BARS:
@@ -654,6 +689,14 @@ def run_trade_decision(
         current_price = pos["current_price"]
         vwap = metrics["vwap"]
 
+        # 利益確定トレーリングストップ用: 当日のピーク損益率（5分足終値ベース）。
+        # エントリー後の最高値（終値）から、利益確定ラインに到達した後の戻り幅を判定する。
+        entry_price = pos["entry_price"]
+        peak_profit_pct = (
+            (float(df_code["close"].max()) - entry_price) / entry_price * 100
+            if entry_price else None
+        )
+
         ohlc = previous_ohlc.get(code)
         previous_high  = ohlc["high"]  if ohlc else None
         previous_low   = ohlc["low"]   if ohlc else None
@@ -711,7 +754,7 @@ def run_trade_decision(
 
         raw = _raw_condition(
             profit_pct, current_price, vwap, breakdown_prev_low_flag,
-            opening_range_breakdown, atr_stop_loss_flag,
+            opening_range_breakdown, atr_stop_loss_flag, peak_profit_pct,
         )
         confirmation_count = _compute_confirmation_count(raw, prev)
 
@@ -722,6 +765,7 @@ def run_trade_decision(
             opening_range_breakout, opening_fade,
             metrics["volume_surge_continuation"], metrics["volume_fading"],
             atr_near_flag, atr_stop_price is not None, vwap_near_flag,
+            peak_profit_pct,
         )
 
         factors = compute_factors({
@@ -749,7 +793,11 @@ def run_trade_decision(
         signal_score = compute_signal_score(signal, factors["score_delta"])
         risk_level = compute_risk_level(signal, signal_score)
 
-        if signal == "STAY":
+        # 利益確定トレーリング（profit_trail_watch / profit_trail_stop）は decide_signal が
+        # ピーク損益率を含む専用の reason を既に組み立てているため、ここでは上書きしない。
+        if raw in ("profit_trail_watch", "profit_trail_stop"):
+            reason = original_reason
+        elif signal == "STAY":
             reason = _build_stay_reason(factors["positive"], original_reason)
         elif signal == "WATCH":
             if raw is not None and confirmation_count < _CONFIRM_BARS:

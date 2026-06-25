@@ -80,6 +80,7 @@ def _simulate_trade(df_day: pd.DataFrame) -> dict | None:
         current_dt = pd.to_datetime(window.iloc[-1]["datetime"])
 
         profit_pct = (current_price - entry_price) / entry_price * 100 if entry_price else 0.0
+        peak_profit_pct = max(peak_profit_pct, profit_pct)
 
         metrics = compute_metrics(window)
         vwap = metrics["vwap"]
@@ -105,7 +106,10 @@ def _simulate_trade(df_day: pd.DataFrame) -> dict | None:
         )
         vwap_near_flag = bool(vwap and abs(current_price - vwap) / vwap <= _VWAP_NEAR_PCT)
 
-        raw = _raw_condition(profit_pct, current_price, vwap, False, opening_range_breakdown, atr_stop_loss_flag)
+        raw = _raw_condition(
+            profit_pct, current_price, vwap, False, opening_range_breakdown, atr_stop_loss_flag,
+            peak_profit_pct,
+        )
         if raw is not None and raw == prev_raw:
             confirmation_count += 1
         elif raw is not None:
@@ -120,9 +124,9 @@ def _simulate_trade(df_day: pd.DataFrame) -> dict | None:
             opening_range_breakout, opening_fade,
             metrics["volume_surge_continuation"], metrics["volume_fading"],
             atr_near_flag, atr_stop_price is not None, vwap_near_flag,
+            peak_profit_pct,
         )
 
-        peak_profit_pct = max(peak_profit_pct, profit_pct)
         max_drawdown_pct = max(max_drawdown_pct, peak_profit_pct - profit_pct)
 
         prev_raw = raw
