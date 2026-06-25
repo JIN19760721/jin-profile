@@ -32,6 +32,8 @@ def build_daily_report(target_date: str) -> pd.DataFrame:
         logger.warning("日次監視レポート: %s のデータがありません", target_date)
         return pd.DataFrame()
 
+    from db import get_company_name
+
     rows = []
     for code, grp in df.groupby("code"):
         grp = grp.sort_values("signal_datetime")
@@ -40,6 +42,7 @@ def build_daily_report(target_date: str) -> pd.DataFrame:
 
         rows.append({
             "code":              code,
+            "company_name":      get_company_name(code) or "",
             "entry_count":       int(signal_counts.get("ENTRY", 0)),
             "watch_count":       int(signal_counts.get("WATCH", 0)),
             "take_profit_count": int(signal_counts.get("TAKE_PROFIT", 0)),

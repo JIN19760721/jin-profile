@@ -446,6 +446,7 @@ def _write_daily_report(wb, df: pd.DataFrame):
     ws = wb.create_sheet("日次監視レポート")
     col_map = {
         "code":              "銘柄コード",
+        "company_name":      "銘柄名",
         "entry_count":       "ENTRY回数",
         "watch_count":        "WATCH回数",
         "take_profit_count": "TAKE_PROFIT回数",
