@@ -144,38 +144,42 @@ export default function TOEICMode({
   ];
 
   return (
-    <div style={{ maxWidth: 640, margin: "0 auto", position: "relative" }}>
+    <div style={{ maxWidth: 640, width: "100%", margin: "0 auto", position: "relative" }}>
       {/* ヘッダー */}
       <header style={{
         position: "sticky", top: 0, zIndex: 100,
         background: "#0f172a", borderBottom: "1px solid #1e293b",
-        padding: "12px 16px", paddingTop: "max(12px,env(safe-area-inset-top))",
-        display: "flex", alignItems: "center", justifyContent: "space-between",
+        paddingTop: "max(10px,env(safe-area-inset-top))",
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button onClick={onBack}
-            style={{ background: "#1e293b", border: "none", borderRadius: 8, padding: "6px 10px",
-                     color: "#94a3b8", cursor: "pointer", fontSize: 16 }}>
-            ‹
-          </button>
-          <h1 style={{ fontSize: 17, fontWeight: 700 }}>📊 TOEIC対策</h1>
-        </div>
-        {/* レベル選択 */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        {/* 1行目：戻るボタン・タイトル・バッジ */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                      padding: "0 16px 8px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button onClick={onBack}
+              style={{ background: "#1e293b", border: "none", borderRadius: 8, padding: "6px 10px",
+                       color: "#94a3b8", cursor: "pointer", fontSize: 16, flexShrink: 0 }}>
+              ‹
+            </button>
+            <h1 style={{ fontSize: 17, fontWeight: 700, whiteSpace: "nowrap" }}>📊 TOEIC対策</h1>
+          </div>
           {wrongCount > 0 && (
             <button onClick={() => { handleSourceChange("wrong"); setActiveTab("words"); }}
               style={{ background: "rgba(239,68,68,0.15)", color: "#f87171", border: "none",
-                       borderRadius: 999, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
-              ❌ {wrongCount}
+                       borderRadius: 999, padding: "4px 12px", fontSize: 12, fontWeight: 600,
+                       cursor: "pointer", flexShrink: 0 }}>
+              ❌ 苦手 {wrongCount}
             </button>
           )}
+        </div>
+        {/* 2行目：レベル選択 */}
+        <div style={{ display: "flex", gap: 6, padding: "0 16px 10px", overflowX: "auto" }}>
           {(["全て","TOEIC600","TOEIC730","TOEIC860"] as TLevel[]).map((lv) => (
             <button key={lv} onClick={() => handleLevelChange(lv)}
-              style={{ padding: "4px 8px", borderRadius: 8, fontSize: 10, fontWeight: 600,
-                       border: "none", cursor: "pointer",
+              style={{ padding: "5px 12px", borderRadius: 8, fontSize: 11, fontWeight: 600,
+                       border: "none", cursor: "pointer", flexShrink: 0,
                        background: tLevel === lv ? "#0e7490" : "#1e293b",
                        color:      tLevel === lv ? "#fff"    : "#64748b" }}>
-              {lv === "全て" ? "ALL" : lv.replace("TOEIC","")}
+              {lv === "全て" ? "ALL" : lv}
             </button>
           ))}
         </div>
@@ -385,16 +389,17 @@ export default function TOEICMode({
         width: "100%", maxWidth: 640, background: "#0f172a",
         borderTop: "1px solid #1e293b", display: "flex", zIndex: 100,
         paddingBottom: "env(safe-area-inset-bottom,0px)",
+        overflowX: "auto",
       }}>
         {tabs.map((tab) => (
           <button key={tab.id}
             onClick={() => { setActiveTab(tab.id); if (tab.id !== "parts") setSelPart(null); }}
-            style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
-                     justifyContent: "center", gap: 2, padding: "10px 0",
+            style={{ flex: "1 0 auto", minWidth: 52, display: "flex", flexDirection: "column",
+                     alignItems: "center", justifyContent: "center", gap: 2, padding: "10px 4px",
                      border: "none", background: "none", cursor: "pointer", minHeight: 56,
                      color: activeTab === tab.id ? "#22d3ee" : "#64748b",
-                     fontSize: 11, fontWeight: 500, position: "relative" }}>
-            <span style={{ fontSize: 20, lineHeight: 1 }}>{tab.icon}</span>
+                     fontSize: 10, fontWeight: 500, position: "relative" }}>
+            <span style={{ fontSize: 19, lineHeight: 1 }}>{tab.icon}</span>
             <span>{tab.label}</span>
             {tab.id === "review" && reviewCount > 0 && (
               <span style={{

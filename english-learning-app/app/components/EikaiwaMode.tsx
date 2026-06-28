@@ -96,7 +96,7 @@ export default function EikaiwaMode({
   };
 
   return (
-    <div style={{ maxWidth: 640, margin: "0 auto", position: "relative" }}>
+    <div style={{ maxWidth: 640, width: "100%", margin: "0 auto", position: "relative" }}>
       {/* ヘッダー */}
       <header style={{
         position: "sticky", top: 0, zIndex: 100,
@@ -104,13 +104,13 @@ export default function EikaiwaMode({
         padding: "12px 16px", paddingTop: "max(12px,env(safe-area-inset-top))",
         display: "flex", alignItems: "center", justifyContent: "space-between",
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
           <button onClick={onBack}
             style={{ background: "#1e293b", border: "none", borderRadius: 8, padding: "6px 10px",
-                     color: "#94a3b8", cursor: "pointer", fontSize: 16 }}>
+                     color: "#94a3b8", cursor: "pointer", fontSize: 16, flexShrink: 0 }}>
             ‹
           </button>
-          <h1 style={{ fontSize: 17, fontWeight: 700 }}>🗣️ 英会話モード</h1>
+          <h1 style={{ fontSize: 17, fontWeight: 700, whiteSpace: "nowrap" }}>🗣️ 英会話モード</h1>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           {wrongCount > 0 && (
