@@ -36,7 +36,7 @@ function makePart5Question(word: Word): string {
 export default function Quiz({ words, mode = "eikaiwa", part5Style = false, mockMode = false, onComplete, onWrong }: QuizProps) {
   const [questionWords, setQuestionWords] = useState(() => shuffle(words));
   const [qIndex,   setQIndex]   = useState(0);
-  const [options,  setOptions]  = useState(() => buildOptions(words, shuffle(words)[0]));
+  const [options,  setOptions]  = useState(() => buildOptions(words, questionWords[0]));
   const [selected, setSelected] = useState<number | null>(null);
   const [score,    setScore]    = useState(0);
   const [finished, setFinished] = useState(false);
