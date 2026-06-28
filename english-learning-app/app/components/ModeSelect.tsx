@@ -24,7 +24,7 @@ export default function ModeSelect({ onSelect }: Props) {
         </p>
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 14, width: "100%", maxWidth: 380 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14, width: "min(100%, 380px)" }}>
 
         {/* 英会話モード */}
         <button onClick={() => onSelect("eikaiwa")}

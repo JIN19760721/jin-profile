@@ -65,7 +65,7 @@ export default function DictionaryMode({ vocabulary, isInList, onToggle, onBack 
   const clearRecent = () => { setRecent([]); saveRecent([]); };
 
   return (
-    <div style={{ maxWidth: 640, margin: "0 auto", position: "relative" }}>
+    <div style={{ maxWidth: 640, width: "100%", margin: "0 auto", position: "relative" }}>
       {/* ヘッダー */}
       <header style={{
         position: "sticky", top: 0, zIndex: 100,
@@ -75,10 +75,10 @@ export default function DictionaryMode({ vocabulary, isInList, onToggle, onBack 
       }}>
         <button onClick={onBack}
           style={{ background: "#1e293b", border: "none", borderRadius: 8, padding: "6px 10px",
-                   color: "#94a3b8", cursor: "pointer", fontSize: 16, flexShrink: 0 }}>
+                   color: "#94a3b8", cursor: "pointer", fontSize: 16, flexShrink: 0, lineHeight: 1 }}>
           ‹
         </button>
-        <div style={{ flex: 1, position: "relative" }}>
+        <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
           <input
             ref={inputRef}
             value={query}
