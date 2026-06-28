@@ -9,6 +9,7 @@ import type { ReviewItem, ReviewItemType } from "../hooks/useReviewList";
 import type { StudyHistory }   from "../hooks/useStudyHistory";
 
 type Tab = "home" | "flashcard" | "phrases" | "quiz" | "review";
+type QuizSource = "all" | "wrong";
 
 const LEVELS_EW = ["中学", "高校"] as const;
 type LevelEW = typeof LEVELS_EW[number];
@@ -19,14 +20,18 @@ function pickRandom<T>(arr: T[], n: number): T[] {
 }
 
 interface Props {
-  vocabulary:  Word[];
-  phrases:     Phrase[];
-  reviewItems: ReviewItem[];
-  onToggle:    (type: ReviewItemType, id: number) => void;
-  onRemove:    (type: ReviewItemType, id: number) => void;
-  isInList:    (type: ReviewItemType, id: number) => boolean;
-  history:     StudyHistory;
-  onBack:      () => void;
+  vocabulary:    Word[];
+  phrases:       Phrase[];
+  reviewItems:   ReviewItem[];
+  onToggle:      (type: ReviewItemType, id: number) => void;
+  onRemove:      (type: ReviewItemType, id: number) => void;
+  isInList:      (type: ReviewItemType, id: number) => boolean;
+  history:       StudyHistory;
+  wrongIds:      Set<number>;
+  onWrong:       (id: number) => void;
+  onRemoveWrong: (id: number) => void;
+  onClearWrong:  () => void;
+  onBack:        () => void;
 }
 
 const tabs: { id: Tab; label: string; icon: string }[] = [
@@ -38,22 +43,27 @@ const tabs: { id: Tab; label: string; icon: string }[] = [
 ];
 
 export default function EikaiwaMode({
-  vocabulary, phrases, reviewItems, onToggle, onRemove, isInList, history, onBack,
+  vocabulary, phrases, reviewItems, onToggle, onRemove, isInList, history,
+  wrongIds, onWrong, onRemoveWrong, onClearWrong, onBack,
 }: Props) {
-  // 中学・高校のみ
   const ewVocab   = vocabulary.filter((w) => w.level === "中学" || w.level === "高校");
-  const ewPhrases = phrases; // フレーズはすべて英会話用
+  const ewPhrases = phrases;
 
-  const [activeTab,  setActiveTab]  = useState<Tab>("home");
-  const [filter,     setFilter]     = useState<LevelEW | "全て">("全て");
-  const [cardIndex,  setCardIndex]  = useState(0);
-  const [flashWords, setFlashWords] = useState<Word[]>(()   => pickRandom(ewVocab, SESSION));
-  const [quizWords,  setQuizWords]  = useState<Word[]>(()   => pickRandom(ewVocab, SESSION));
-  const [quizKey,    setQuizKey]    = useState(0);
-  const [phraseList, setPhraseList] = useState<Phrase[]>(() => pickRandom(ewPhrases, SESSION));
+  const [activeTab,   setActiveTab]   = useState<Tab>("home");
+  const [filter,      setFilter]      = useState<LevelEW | "全て">("全て");
+  const [cardIndex,   setCardIndex]   = useState(0);
+  const [flashWords,  setFlashWords]  = useState<Word[]>(() => pickRandom(ewVocab, SESSION));
+  const [quizWords,   setQuizWords]   = useState<Word[]>(() => pickRandom(ewVocab, SESSION));
+  const [quizKey,     setQuizKey]     = useState(0);
+  const [phraseList,  setPhraseList]  = useState<Phrase[]>(() => pickRandom(ewPhrases, SESSION));
+  const [quizSource,  setQuizSource]  = useState<QuizSource>("all");
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   const reviewCount = reviewItems.length;
+  const wrongCount  = wrongIds.size;
   const safeIndex   = flashWords.length > 0 ? cardIndex % flashWords.length : 0;
+
+  const wrongWords  = ewVocab.filter((w) => wrongIds.has(w.id));
 
   const levelPool = (lv: LevelEW | "全て") =>
     lv === "全て" ? ewVocab : ewVocab.filter((w) => w.level === lv);
@@ -64,8 +74,21 @@ export default function EikaiwaMode({
     setFlashWords(pickRandom(levelPool(lv), SESSION));
   };
   const shuffleFlash  = () => { setCardIndex(0); setFlashWords(pickRandom(levelPool(filter), SESSION)); };
-  const shuffleQuiz   = () => { setQuizWords(pickRandom(ewVocab, SESSION)); setQuizKey((k) => k + 1); };
+  const shuffleQuiz   = () => {
+    const pool = quizSource === "wrong" ? wrongWords : ewVocab;
+    setQuizWords(pickRandom(pool, Math.min(SESSION, pool.length)));
+    setQuizKey((k) => k + 1);
+  };
   const shufflePhrase = () => setPhraseList(pickRandom(ewPhrases, SESSION));
+
+  const handleSourceChange = (src: QuizSource) => {
+    setQuizSource(src);
+    const pool = src === "wrong" ? wrongWords : ewVocab;
+    if (pool.length > 0) {
+      setQuizWords(pickRandom(pool, Math.min(SESSION, pool.length)));
+      setQuizKey((k) => k + 1);
+    }
+  };
 
   const levelCounts = {
     "中学": ewVocab.filter((w) => w.level === "中学").length,
@@ -89,13 +112,22 @@ export default function EikaiwaMode({
           </button>
           <h1 style={{ fontSize: 17, fontWeight: 700 }}>🗣️ 英会話モード</h1>
         </div>
-        {reviewCount > 0 && (
-          <button onClick={() => setActiveTab("review")}
-            style={{ background: "rgba(245,158,11,0.15)", color: "#fbbf24", border: "none",
-                     borderRadius: 999, padding: "6px 14px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
-            ⭐ {reviewCount}
-          </button>
-        )}
+        <div style={{ display: "flex", gap: 8 }}>
+          {wrongCount > 0 && (
+            <button onClick={() => { handleSourceChange("wrong"); setActiveTab("quiz"); }}
+              style={{ background: "rgba(239,68,68,0.15)", color: "#f87171", border: "none",
+                       borderRadius: 999, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+              ❌ {wrongCount}
+            </button>
+          )}
+          {reviewCount > 0 && (
+            <button onClick={() => setActiveTab("review")}
+              style={{ background: "rgba(245,158,11,0.15)", color: "#fbbf24", border: "none",
+                       borderRadius: 999, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+              ⭐ {reviewCount}
+            </button>
+          )}
+        </div>
       </header>
 
       <main style={{ padding: "20px 16px 100px" }}>
@@ -109,20 +141,40 @@ export default function EikaiwaMode({
             }}>
               <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>英会話モード</h2>
               <p style={{ color: "#c7d2fe", fontSize: 13 }}>中学・高校レベルで日常英会話をマスター</p>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginTop: 14 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginTop: 14 }}>
                 {[
                   { v: ewVocab.length,   l: "単語" },
                   { v: ewPhrases.length, l: "フレーズ" },
+                  { v: wrongCount,       l: "苦手" },
                   { v: reviewCount,      l: "復習" },
                 ].map(({ v, l }) => (
                   <div key={l} style={{ background: "rgba(255,255,255,0.15)", borderRadius: 12,
                                         padding: "10px 0", textAlign: "center" }}>
-                    <div style={{ fontSize: 22, fontWeight: 700 }}>{v}</div>
+                    <div style={{ fontSize: 20, fontWeight: 700 }}>{v}</div>
                     <div style={{ fontSize: 10, color: "#c7d2fe" }}>{l}</div>
                   </div>
                 ))}
               </div>
             </div>
+
+            {/* 苦手単語バナー */}
+            {wrongCount > 0 && (
+              <button onClick={() => { handleSourceChange("wrong"); setActiveTab("quiz"); }}
+                style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)",
+                         borderRadius: 16, padding: "14px 16px", cursor: "pointer",
+                         display: "flex", alignItems: "center", gap: 12, width: "100%", textAlign: "left" }}>
+                <span style={{ fontSize: 28 }}>❌</span>
+                <div style={{ flex: 1 }}>
+                  <p style={{ color: "#f87171", fontWeight: 700, fontSize: 15 }}>
+                    苦手単語 {wrongCount}語
+                  </p>
+                  <p style={{ color: "#64748b", fontSize: 12 }}>
+                    クイズで間違えた単語です。タップして復習する
+                  </p>
+                </div>
+                <span style={{ color: "#f87171", fontSize: 18 }}>›</span>
+              </button>
+            )}
 
             {/* 学習ストリーク */}
             {history.streak > 0 && (
@@ -258,14 +310,98 @@ export default function EikaiwaMode({
               <div>
                 <h2 style={{ fontSize: 20, fontWeight: 700 }}>単語クイズ</h2>
                 <p style={{ color: "#64748b", fontSize: 12, marginTop: 2 }}>
-                  中学・高校 {ewVocab.length} 語からランダム {quizWords.length} 問
+                  {quizSource === "wrong"
+                    ? `苦手単語 ${wrongWords.length} 語から ${quizWords.length} 問`
+                    : `中学・高校 ${ewVocab.length} 語からランダム ${quizWords.length} 問`}
                 </p>
               </div>
               <button onClick={shuffleQuiz} style={shuffleBtn("#431407","#fdba74","#7c2d12")}>
                 🔀 新しい問題
               </button>
             </div>
-            <Quiz key={quizKey} words={quizWords} mode="eikaiwa" />
+
+            {/* 出題ソース切替 */}
+            <div style={{ display: "flex", gap: 6, background: "#1e293b",
+                          borderRadius: 12, padding: 4 }}>
+              {(["all", "wrong"] as QuizSource[]).map((src) => {
+                const label  = src === "all" ? "全単語から出題" : `苦手単語から出題 (${wrongCount})`;
+                const active = quizSource === src;
+                return (
+                  <button key={src} onClick={() => handleSourceChange(src)}
+                    style={{ flex: 1, padding: "8px 0", borderRadius: 10, border: "none",
+                             cursor: "pointer", fontSize: 12, fontWeight: 600,
+                             background: active ? (src === "wrong" ? "#991b1b" : "#4f46e5") : "transparent",
+                             color:      active ? "#fff" : "#64748b" }}>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* 苦手出題で単語がない場合 */}
+            {quizSource === "wrong" && wrongWords.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "40px 20px",
+                            background: "#1e293b", borderRadius: 16, border: "1px solid #334155" }}>
+                <p style={{ fontSize: 36, marginBottom: 10 }}>🎉</p>
+                <p style={{ color: "#e2e8f0", fontSize: 16, fontWeight: 700, marginBottom: 6 }}>
+                  苦手単語がありません！
+                </p>
+                <p style={{ color: "#64748b", fontSize: 13 }}>
+                  クイズで間違えた単語がここに表示されます
+                </p>
+              </div>
+            ) : (
+              <Quiz key={quizKey} words={quizWords} mode="eikaiwa" onWrong={onWrong} />
+            )}
+
+            {/* 苦手単語リスト */}
+            {quizSource === "wrong" && wrongWords.length > 0 && (
+              <div style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 16, padding: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <p style={{ color: "#94a3b8", fontSize: 13, fontWeight: 600 }}>
+                    苦手単語リスト ({wrongWords.length}語)
+                  </p>
+                  {showClearConfirm ? (
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={() => { onClearWrong(); setShowClearConfirm(false); setQuizSource("all"); }}
+                        style={{ background: "#991b1b", color: "#fff", border: "none", borderRadius: 8,
+                                 padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>
+                        リセット確認
+                      </button>
+                      <button onClick={() => setShowClearConfirm(false)}
+                        style={{ background: "#334155", color: "#94a3b8", border: "none", borderRadius: 8,
+                                 padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>
+                        キャンセル
+                      </button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setShowClearConfirm(true)}
+                      style={{ color: "#64748b", fontSize: 12, background: "none", border: "none", cursor: "pointer" }}>
+                      リセット
+                    </button>
+                  )}
+                </div>
+                {wrongWords.slice(0, 10).map((w) => (
+                  <div key={w.id} style={{ display: "flex", alignItems: "center", gap: 10,
+                                           padding: "6px 0", borderBottom: "1px solid #334155" }}>
+                    <div style={{ flex: 1 }}>
+                      <span style={{ color: "#e2e8f0", fontSize: 14, fontWeight: 600 }}>{w.english}</span>
+                      <span style={{ color: "#64748b", fontSize: 12, marginLeft: 8 }}>{w.japanese}</span>
+                    </div>
+                    <button onClick={() => onRemoveWrong(w.id)}
+                      style={{ background: "none", border: "none", color: "#475569",
+                               cursor: "pointer", fontSize: 14, padding: "2px 6px" }}>
+                      ×
+                    </button>
+                  </div>
+                ))}
+                {wrongWords.length > 10 && (
+                  <p style={{ color: "#475569", fontSize: 12, marginTop: 8, textAlign: "center" }}>
+                    他 {wrongWords.length - 10} 語
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -299,6 +435,16 @@ export default function EikaiwaMode({
                 display: "flex", alignItems: "center", justifyContent: "center",
               }}>
                 {reviewCount > 9 ? "9+" : reviewCount}
+              </span>
+            )}
+            {tab.id === "quiz" && wrongCount > 0 && (
+              <span style={{
+                position: "absolute", top: 6, right: "calc(50% - 18px)",
+                background: "#ef4444", color: "#fff", fontSize: 9, fontWeight: 700,
+                width: 16, height: 16, borderRadius: 99,
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                {wrongCount > 9 ? "9+" : wrongCount}
               </span>
             )}
             {activeTab === tab.id && (

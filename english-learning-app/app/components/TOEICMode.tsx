@@ -62,36 +62,47 @@ const AI_TIPS = [
 ];
 
 interface Props {
-  vocabulary:  Word[];
-  phrases:     Phrase[];
-  reviewItems: ReviewItem[];
-  onToggle:    (type: ReviewItemType, id: number) => void;
-  onRemove:    (type: ReviewItemType, id: number) => void;
-  isInList:    (type: ReviewItemType, id: number) => boolean;
-  history:     StudyHistory;
-  addRecord:   (r: Omit<import("../hooks/useStudyHistory").QuizRecord, "date">) => void;
-  onBack:      () => void;
+  vocabulary:    Word[];
+  phrases:       Phrase[];
+  reviewItems:   ReviewItem[];
+  onToggle:      (type: ReviewItemType, id: number) => void;
+  onRemove:      (type: ReviewItemType, id: number) => void;
+  isInList:      (type: ReviewItemType, id: number) => boolean;
+  history:       StudyHistory;
+  addRecord:     (r: Omit<import("../hooks/useStudyHistory").QuizRecord, "date">) => void;
+  wrongIds:      Set<number>;
+  onWrong:       (id: number) => void;
+  onRemoveWrong: (id: number) => void;
+  onClearWrong:  () => void;
+  onBack:        () => void;
 }
 
+type QuizSource = "all" | "wrong";
+
 export default function TOEICMode({
-  vocabulary, phrases, reviewItems, onToggle, onRemove, isInList, history, addRecord, onBack,
+  vocabulary, phrases, reviewItems, onToggle, onRemove, isInList, history, addRecord,
+  wrongIds, onWrong, onRemoveWrong, onClearWrong, onBack,
 }: Props) {
   const toeicVocab = vocabulary.filter((w) =>
     w.level === "TOEIC600" || w.level === "TOEIC730" || w.level === "TOEIC860"
   );
 
-  const [activeTab,  setActiveTab]  = useState<Tab>("home");
-  const [tLevel,     setTLevel]     = useState<TLevel>("全て");
-  const [cardIndex,  setCardIndex]  = useState(0);
-  const [flashWords, setFlashWords] = useState<Word[]>(() => pickRandom(toeicVocab, SESSION));
-  const [quizWords,  setQuizWords]  = useState<Word[]>(() => pickRandom(toeicVocab, SESSION));
-  const [quizKey,    setQuizKey]    = useState(0);
-  const [selPart,    setSelPart]    = useState<number | null>(null);
-  const [mockKey,    setMockKey]    = useState(0);
-  const [mockWords,  setMockWords]  = useState<Word[]>(() => pickRandom(toeicVocab, 40));
+  const [activeTab,        setActiveTab]        = useState<Tab>("home");
+  const [tLevel,           setTLevel]           = useState<TLevel>("全て");
+  const [cardIndex,        setCardIndex]        = useState(0);
+  const [flashWords,       setFlashWords]       = useState<Word[]>(() => pickRandom(toeicVocab, SESSION));
+  const [quizWords,        setQuizWords]        = useState<Word[]>(() => pickRandom(toeicVocab, SESSION));
+  const [quizKey,          setQuizKey]          = useState(0);
+  const [selPart,          setSelPart]          = useState<number | null>(null);
+  const [mockKey,          setMockKey]          = useState(0);
+  const [mockWords,        setMockWords]        = useState<Word[]>(() => pickRandom(toeicVocab, 40));
+  const [quizSource,       setQuizSource]       = useState<QuizSource>("all");
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
 
   const reviewCount = reviewItems.length;
+  const wrongCount  = wrongIds.size;
   const safeIndex   = flashWords.length > 0 ? cardIndex % flashWords.length : 0;
+  const wrongWords  = toeicVocab.filter((w) => wrongIds.has(w.id));
 
   const levelPool = (lv: TLevel) =>
     lv === "全て" ? toeicVocab : toeicVocab.filter((w) => w.level === lv);
@@ -102,7 +113,19 @@ export default function TOEICMode({
     setFlashWords(pickRandom(levelPool(lv), SESSION));
   };
   const shuffleFlash = () => { setCardIndex(0); setFlashWords(pickRandom(levelPool(tLevel), SESSION)); };
-  const shuffleQuiz  = () => { setQuizWords(pickRandom(levelPool(tLevel), SESSION)); setQuizKey((k) => k + 1); };
+  const shuffleQuiz  = () => {
+    const pool = quizSource === "wrong" ? wrongWords : levelPool(tLevel);
+    setQuizWords(pickRandom(pool, Math.min(SESSION, pool.length)));
+    setQuizKey((k) => k + 1);
+  };
+  const handleSourceChange = (src: QuizSource) => {
+    setQuizSource(src);
+    const pool = src === "wrong" ? wrongWords : levelPool(tLevel);
+    if (pool.length > 0) {
+      setQuizWords(pickRandom(pool, Math.min(SESSION, pool.length)));
+      setQuizKey((k) => k + 1);
+    }
+  };
   const newMock      = () => { setMockWords(pickRandom(toeicVocab, 40)); setMockKey((k) => k + 1); };
 
   const lCounts = {
@@ -138,7 +161,14 @@ export default function TOEICMode({
           <h1 style={{ fontSize: 17, fontWeight: 700 }}>📊 TOEIC対策</h1>
         </div>
         {/* レベル選択 */}
-        <div style={{ display: "flex", gap: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {wrongCount > 0 && (
+            <button onClick={() => { handleSourceChange("wrong"); setActiveTab("words"); }}
+              style={{ background: "rgba(239,68,68,0.15)", color: "#f87171", border: "none",
+                       borderRadius: 999, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+              ❌ {wrongCount}
+            </button>
+          )}
           {(["全て","TOEIC600","TOEIC730","TOEIC860"] as TLevel[]).map((lv) => (
             <button key={lv} onClick={() => handleLevelChange(lv)}
               style={{ padding: "4px 8px", borderRadius: 8, fontSize: 10, fontWeight: 600,
@@ -157,8 +187,11 @@ export default function TOEICMode({
         {activeTab === "home" && (
           <TOEICHome
             toeicVocab={toeicVocab} lCounts={lCounts}
-            history={history} reviewCount={reviewCount}
-            onNavigate={setActiveTab}
+            history={history} reviewCount={reviewCount} wrongCount={wrongCount}
+            onNavigate={(tab) => {
+              if (tab === "words" && wrongCount > 0) handleSourceChange("wrong");
+              setActiveTab(tab);
+            }}
           />
         )}
 
@@ -189,21 +222,99 @@ export default function TOEICMode({
               <p style={{ color: "#64748b", textAlign: "center", padding: "40px 0" }}>単語がありません</p>
             )}
 
-            {/* 単語クイズボタン */}
+            {/* 単語クイズ */}
             <div style={{ borderTop: "1px solid #1e293b", paddingTop: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
                 <div>
                   <p style={{ color: "#e2e8f0", fontWeight: 600 }}>単語クイズ</p>
                   <p style={{ color: "#64748b", fontSize: 12 }}>
-                    {levelPool(tLevel).length} 語からランダム {SESSION} 問
+                    {quizSource === "wrong"
+                      ? `苦手単語 ${wrongWords.length} 語から ${quizWords.length} 問`
+                      : `${levelPool(tLevel).length} 語からランダム ${quizWords.length} 問`}
                   </p>
                 </div>
                 <button onClick={shuffleQuiz} style={sBtn("#431407","#fdba74","#7c2d12")}>
                   🔀 新しい問題
                 </button>
               </div>
-              <Quiz key={quizKey} words={quizWords} mode="toeic"
-                onComplete={(score, total) => addRecord({ mode: "toeic", level: tLevel, score, total })} />
+
+              {/* 出題ソース切替 */}
+              <div style={{ display: "flex", gap: 6, background: "#1e293b",
+                            borderRadius: 12, padding: 4, marginBottom: 12 }}>
+                {(["all", "wrong"] as QuizSource[]).map((src) => {
+                  const label  = src === "all" ? "全単語から出題" : `苦手単語から出題 (${wrongCount})`;
+                  const active = quizSource === src;
+                  return (
+                    <button key={src} onClick={() => handleSourceChange(src)}
+                      style={{ flex: 1, padding: "7px 0", borderRadius: 10, border: "none",
+                               cursor: "pointer", fontSize: 12, fontWeight: 600,
+                               background: active ? (src === "wrong" ? "#991b1b" : "#0e7490") : "transparent",
+                               color:      active ? "#fff" : "#64748b" }}>
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {quizSource === "wrong" && wrongWords.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "32px 20px",
+                              background: "#0f172a", borderRadius: 14, border: "1px solid #1e293b" }}>
+                  <p style={{ fontSize: 32, marginBottom: 8 }}>🎉</p>
+                  <p style={{ color: "#e2e8f0", fontSize: 15, fontWeight: 700 }}>苦手単語がありません！</p>
+                  <p style={{ color: "#64748b", fontSize: 12, marginTop: 4 }}>クイズで間違えた単語がここに表示されます</p>
+                </div>
+              ) : (
+                <Quiz key={quizKey} words={quizWords} mode="toeic" onWrong={onWrong}
+                  onComplete={(score, total) => addRecord({ mode: "toeic", level: tLevel, score, total })} />
+              )}
+
+              {/* 苦手単語リスト */}
+              {quizSource === "wrong" && wrongWords.length > 0 && (
+                <div style={{ marginTop: 16, background: "#0f172a", border: "1px solid #1e293b",
+                              borderRadius: 14, padding: 14 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                    <p style={{ color: "#64748b", fontSize: 12, fontWeight: 600 }}>苦手単語リスト ({wrongWords.length}語)</p>
+                    {showClearConfirm ? (
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => { onClearWrong(); setShowClearConfirm(false); setQuizSource("all"); }}
+                          style={{ background: "#991b1b", color: "#fff", border: "none", borderRadius: 8,
+                                   padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>
+                          リセット確認
+                        </button>
+                        <button onClick={() => setShowClearConfirm(false)}
+                          style={{ background: "#334155", color: "#94a3b8", border: "none", borderRadius: 8,
+                                   padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>
+                          キャンセル
+                        </button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setShowClearConfirm(true)}
+                        style={{ color: "#64748b", fontSize: 12, background: "none", border: "none", cursor: "pointer" }}>
+                        リセット
+                      </button>
+                    )}
+                  </div>
+                  {wrongWords.slice(0, 10).map((w) => (
+                    <div key={w.id} style={{ display: "flex", alignItems: "center", gap: 10,
+                                             padding: "6px 0", borderBottom: "1px solid #1e293b" }}>
+                      <div style={{ flex: 1 }}>
+                        <span style={{ color: "#e2e8f0", fontSize: 13, fontWeight: 600 }}>{w.english}</span>
+                        <span style={{ color: "#64748b", fontSize: 12, marginLeft: 8 }}>{w.japanese}</span>
+                      </div>
+                      <button onClick={() => onRemoveWrong(w.id)}
+                        style={{ background: "none", border: "none", color: "#475569",
+                                 cursor: "pointer", fontSize: 14, padding: "2px 6px" }}>
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  {wrongWords.length > 10 && (
+                    <p style={{ color: "#475569", fontSize: 12, marginTop: 6, textAlign: "center" }}>
+                      他 {wrongWords.length - 10} 語
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -253,7 +364,8 @@ export default function TOEICMode({
 
         {/* ── 弱点分析 ─────────────────────────────────── */}
         {activeTab === "weakness" && (
-          <TOEICWeakness history={history} lCounts={lCounts} reviewItems={reviewItems} />
+          <TOEICWeakness history={history} lCounts={lCounts} reviewItems={reviewItems} wrongCount={wrongCount}
+            onGoToWrong={() => { handleSourceChange("wrong"); setActiveTab("words"); }} />
         )}
 
         {/* ── 学習履歴 ─────────────────────────────────── */}
@@ -309,9 +421,9 @@ export default function TOEICMode({
 // サブコンポーネント
 // ──────────────────────────────────────────────────────────
 
-function TOEICHome({ toeicVocab, lCounts, history, reviewCount, onNavigate }: {
+function TOEICHome({ toeicVocab, lCounts, history, reviewCount, wrongCount, onNavigate }: {
   toeicVocab: Word[]; lCounts: Record<string, number>;
-  history: StudyHistory; reviewCount: number; onNavigate: (t: Tab) => void;
+  history: StudyHistory; reviewCount: number; wrongCount: number; onNavigate: (t: Tab) => void;
 }) {
   const levelColor: Record<string, string> = {
     "TOEIC600": "#f59e0b", "TOEIC730": "#f97316", "TOEIC860": "#ef4444",
@@ -325,15 +437,16 @@ function TOEICHome({ toeicVocab, lCounts, history, reviewCount, onNavigate }: {
                     padding: 20, color: "#fff" }}>
         <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>TOEIC対策モード</h2>
         <p style={{ color: "#a5f3fc", fontSize: 13 }}>TOEIC 600〜860点を目指す</p>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginTop: 14 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginTop: 14 }}>
           {[
             { v: toeicVocab.length, l: "TOEIC単語" },
             { v: history.streak,   l: "連続学習日" },
+            { v: wrongCount,       l: "苦手単語" },
             { v: reviewCount,      l: "復習リスト" },
           ].map(({ v, l }) => (
             <div key={l} style={{ background: "rgba(255,255,255,0.15)", borderRadius: 12,
                                   padding: "10px 0", textAlign: "center" }}>
-              <div style={{ fontSize: 20, fontWeight: 700 }}>{v}</div>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>{v}</div>
               <div style={{ fontSize: 10, color: "#a5f3fc" }}>{l}</div>
             </div>
           ))}
@@ -591,10 +704,12 @@ function TOEICMockTest({ words, onComplete, onNewTest }: {
   );
 }
 
-function TOEICWeakness({ history, lCounts, reviewItems }: {
+function TOEICWeakness({ history, lCounts, reviewItems, wrongCount, onGoToWrong }: {
   history: StudyHistory;
   lCounts: Record<string, number>;
   reviewItems: ReviewItem[];
+  wrongCount: number;
+  onGoToWrong: () => void;
 }) {
   const levels = ["TOEIC600", "TOEIC730", "TOEIC860", "Part5", "模試"] as const;
 
@@ -638,10 +753,29 @@ function TOEICWeakness({ history, lCounts, reviewItems }: {
         })}
       </div>
 
+      {/* 苦手単語 */}
+      <div style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 16, padding: 16 }}>
+        <p style={{ color: "#94a3b8", fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
+          ❌ 苦手単語
+        </p>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <p style={{ color: "#cbd5e1", fontSize: 14 }}>クイズで間違えた単語数</p>
+          <p style={{ color: "#f87171", fontSize: 22, fontWeight: 700 }}>{wrongCount}</p>
+        </div>
+        {wrongCount > 0 && (
+          <button onClick={onGoToWrong}
+            style={{ marginTop: 10, width: "100%", background: "rgba(239,68,68,0.1)",
+                     border: "1px solid rgba(239,68,68,0.3)", borderRadius: 10,
+                     padding: "8px", color: "#f87171", fontSize: 13, cursor: "pointer", fontWeight: 600 }}>
+            苦手単語から出題する →
+          </button>
+        )}
+      </div>
+
       {/* 復習リストから弱点推定 */}
       <div style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 16, padding: 16 }}>
         <p style={{ color: "#94a3b8", fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
-          📌 復習リストの状況
+          ⭐ 復習リストの状況
         </p>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <p style={{ color: "#cbd5e1", fontSize: 14 }}>要復習単語数</p>

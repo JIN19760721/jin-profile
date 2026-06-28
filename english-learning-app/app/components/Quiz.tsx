@@ -8,6 +8,7 @@ interface QuizProps {
   part5Style?: boolean;  // Part5風の穴埋め表示
   mockMode?:   boolean;  // 模試モード（次へボタンのみ、解説省略）
   onComplete?: (score: number, total: number) => void;
+  onWrong?:    (wordId: number) => void;  // 不正解時のコールバック
 }
 
 function shuffle<T>(arr: T[]): T[] {
@@ -32,7 +33,7 @@ function makePart5Question(word: Word): string {
   return blanked;
 }
 
-export default function Quiz({ words, mode = "eikaiwa", part5Style = false, mockMode = false, onComplete }: QuizProps) {
+export default function Quiz({ words, mode = "eikaiwa", part5Style = false, mockMode = false, onComplete, onWrong }: QuizProps) {
   const [questionWords, setQuestionWords] = useState(() => shuffle(words));
   const [qIndex,   setQIndex]   = useState(0);
   const [options,  setOptions]  = useState(() => buildOptions(words, shuffle(words)[0]));
@@ -47,7 +48,9 @@ export default function Quiz({ words, mode = "eikaiwa", part5Style = false, mock
   const handleSelect = (idx: number) => {
     if (selected !== null) return;
     setSelected(idx);
-    if (options[idx].id === target.id) setScore((s) => s + 1);
+    const correct = options[idx].id === target.id;
+    if (correct) setScore((s) => s + 1);
+    else onWrong?.(target.id);
   };
 
   const handleNext = useCallback(() => {
@@ -68,6 +71,7 @@ export default function Quiz({ words, mode = "eikaiwa", part5Style = false, mock
     const correct = options[idx].id === target.id;
     setSelected(idx);
     if (correct) setScore((s) => s + 1);
+    else onWrong?.(target.id);
     if (mockMode) setTimeout(handleNext, 600);
   };
 
