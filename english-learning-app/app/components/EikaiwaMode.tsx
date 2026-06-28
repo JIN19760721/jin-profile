@@ -351,7 +351,7 @@ export default function EikaiwaMode({
                 </p>
               </div>
             ) : (
-              <Quiz key={quizKey} words={quizWords} mode="eikaiwa" onWrong={onWrong} />
+              <Quiz key={quizKey} words={quizWords} pool={ewVocab} mode="eikaiwa" onWrong={onWrong} />
             )}
 
             {/* 苦手単語リスト */}
