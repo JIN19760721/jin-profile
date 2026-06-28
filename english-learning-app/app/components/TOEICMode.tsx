@@ -264,7 +264,7 @@ export default function TOEICMode({
                   <p style={{ color: "#64748b", fontSize: 12, marginTop: 4 }}>クイズで間違えた単語がここに表示されます</p>
                 </div>
               ) : (
-                <Quiz key={quizKey} words={quizWords} mode="toeic" onWrong={onWrong}
+                <Quiz key={quizKey} words={quizWords} pool={toeicVocab} mode="toeic" onWrong={onWrong}
                   onComplete={(score, total) => addRecord({ mode: "toeic", level: tLevel, score, total })} />
               )}
 
@@ -579,7 +579,7 @@ function TOEICPartDetail({ part, vocab, isInList, onToggle, onBack, addRecord }:
                   🔀 新しい問題
                 </button>
               </div>
-              <Quiz key={practiceKey} words={practiceWords} mode="toeic" part5Style
+              <Quiz key={practiceKey} words={practiceWords} pool={vocab} mode="toeic" part5Style
                 onComplete={(score, total) => addRecord({ mode: "toeic", level: "Part5", score, total })} />
             </>
           )}

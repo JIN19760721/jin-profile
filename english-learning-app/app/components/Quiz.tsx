@@ -3,20 +3,21 @@ import { useState, useCallback } from "react";
 import type { Word } from "../data/vocabulary";
 
 interface QuizProps {
-  words:      Word[];
-  mode?:      "eikaiwa" | "toeic";
-  part5Style?: boolean;  // Part5風の穴埋め表示
-  mockMode?:   boolean;  // 模試モード（次へボタンのみ、解説省略）
+  words:       Word[];
+  pool?:       Word[];  // 選択肢（ダミー）の抽出元。未指定時は words を使用
+  mode?:       "eikaiwa" | "toeic";
+  part5Style?: boolean;
+  mockMode?:   boolean;
   onComplete?: (score: number, total: number) => void;
-  onWrong?:    (wordId: number) => void;  // 不正解時のコールバック
+  onWrong?:    (wordId: number) => void;
 }
 
 function shuffle<T>(arr: T[]): T[] {
   return [...arr].sort(() => Math.random() - 0.5);
 }
 
-function buildOptions(words: Word[], target: Word): Word[] {
-  const others = words.filter((w) => w.id !== target.id);
+function buildOptions(pool: Word[], target: Word): Word[] {
+  const others = pool.filter((w) => w.id !== target.id);
   return shuffle([target, ...shuffle(others).slice(0, 3)]);
 }
 
@@ -33,10 +34,11 @@ function makePart5Question(word: Word): string {
   return blanked;
 }
 
-export default function Quiz({ words, mode = "eikaiwa", part5Style = false, mockMode = false, onComplete, onWrong }: QuizProps) {
+export default function Quiz({ words, pool, mode = "eikaiwa", part5Style = false, mockMode = false, onComplete, onWrong }: QuizProps) {
+  const distPool = pool && pool.length >= 4 ? pool : words;
   const [questionWords, setQuestionWords] = useState(() => shuffle(words));
   const [qIndex,   setQIndex]   = useState(0);
-  const [options,  setOptions]  = useState(() => buildOptions(words, questionWords[0]));
+  const [options,  setOptions]  = useState(() => buildOptions(distPool, questionWords[0]));
   const [selected, setSelected] = useState<number | null>(null);
   const [score,    setScore]    = useState(0);
   const [finished, setFinished] = useState(false);
@@ -61,9 +63,9 @@ export default function Quiz({ words, mode = "eikaiwa", part5Style = false, mock
       return;
     }
     setQIndex(next);
-    setOptions(buildOptions(words, questionWords[next]));
+    setOptions(buildOptions(distPool, questionWords[next]));
     setSelected(null);
-  }, [qIndex, questionWords, words, score, isCorrect, onComplete]);
+  }, [qIndex, questionWords, distPool, score, isCorrect, onComplete]);
 
   // 正解時に自動で次へ（模試モード）
   const handleSelectMock = (idx: number) => {
@@ -79,7 +81,7 @@ export default function Quiz({ words, mode = "eikaiwa", part5Style = false, mock
     const s = shuffle(words);
     setQuestionWords(s);
     setQIndex(0);
-    setOptions(buildOptions(words, s[0]));
+    setOptions(buildOptions(distPool, s[0]));
     setSelected(null);
     setScore(0);
     setFinished(false);
