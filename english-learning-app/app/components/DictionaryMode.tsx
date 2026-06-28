@@ -37,7 +37,12 @@ export default function DictionaryMode({ vocabulary, isInList, onToggle, onBack 
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { setRecent(loadRecent()); }, []);
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  // スマホではフォーカス時に自動ズームが起きるため、PCのみ自動フォーカス
+  useEffect(() => {
+    if (window.matchMedia("(hover: hover)").matches) {
+      inputRef.current?.focus();
+    }
+  }, []);
 
   const results = useMemo(() => {
     const q = query.toLowerCase().trim();
@@ -87,7 +92,7 @@ export default function DictionaryMode({ vocabulary, isInList, onToggle, onBack 
             style={{
               width: "100%", padding: "10px 36px 10px 14px",
               background: "#1e293b", border: "1px solid #334155",
-              borderRadius: 12, color: "#e2e8f0", fontSize: 15,
+              borderRadius: 12, color: "#e2e8f0", fontSize: 16,
               outline: "none", boxSizing: "border-box",
             }}
           />
