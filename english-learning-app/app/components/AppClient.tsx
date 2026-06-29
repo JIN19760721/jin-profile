@@ -4,12 +4,13 @@ import ModeSelect      from "./ModeSelect";
 import EikaiwaMode     from "./EikaiwaMode";
 import TOEICMode       from "./TOEICMode";
 import DictionaryMode  from "./DictionaryMode";
+import RankingMode     from "./RankingMode";
 import type { Word, Phrase } from "../data/vocabulary";
 import { useReviewList }   from "../hooks/useReviewList";
 import { useStudyHistory } from "../hooks/useStudyHistory";
 import { useWrongWords }   from "../hooks/useWrongWords";
 
-type AppMode = "select" | "eikaiwa" | "toeic" | "dictionary";
+type AppMode = "select" | "eikaiwa" | "toeic" | "dictionary" | "ranking";
 
 interface Props {
   vocabulary:  Word[];
@@ -34,6 +35,15 @@ export default function AppClient({ vocabulary, phrases }: Props) {
         vocabulary={vocabulary}
         isInList={isInList}
         onToggle={toggle}
+        onBack={() => setMode("select")}
+      />
+    );
+  }
+
+  if (mode === "ranking") {
+    return (
+      <RankingMode
+        history={history}
         onBack={() => setMode("select")}
       />
     );
