@@ -63,6 +63,7 @@ export default function AppClient({ vocabulary, phrases }: Props) {
         onWrong={addWrong}
         onRemoveWrong={removeWrong}
         onClearWrong={clearWrong}
+        onWordsStudied={() => addWordsStudied(1)}
         onBack={() => setMode("select")}
       />
     );
@@ -82,6 +83,7 @@ export default function AppClient({ vocabulary, phrases }: Props) {
       onWrong={addWrong}
       onRemoveWrong={removeWrong}
       onClearWrong={clearWrong}
+      onWordsStudied={() => addWordsStudied(1)}
       onBack={() => setMode("select")}
     />
   );
