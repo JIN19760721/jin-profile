@@ -132,13 +132,11 @@ export default function Quiz({ words, pool, mode = "eikaiwa", part5Style = false
             <p className="text-xs mb-3 opacity-70">空欄に入る単語を選んでください</p>
             <p className="text-sm text-white leading-relaxed text-left px-2"
               dangerouslySetInnerHTML={{ __html: questionText.replace("______", '<span style="background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:4px;font-weight:700">______</span>') }} />
-            <p className="text-xs mt-3 opacity-60">{target.katakana}</p>
           </>
         ) : (
           <>
             <p className="text-xs mb-2 opacity-70">次の英単語の意味は？</p>
             <p className="text-4xl font-bold text-white">{target.english}</p>
-            <p className="mt-2 opacity-70 text-sm">{target.katakana}</p>
           </>
         )}
       </div>
