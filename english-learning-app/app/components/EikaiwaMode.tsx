@@ -27,11 +27,12 @@ interface Props {
   onRemove:      (type: ReviewItemType, id: number) => void;
   isInList:      (type: ReviewItemType, id: number) => boolean;
   history:       StudyHistory;
-  wrongIds:      Set<number>;
-  onWrong:       (id: number) => void;
-  onRemoveWrong: (id: number) => void;
-  onClearWrong:  () => void;
-  onBack:        () => void;
+  wrongIds:       Set<number>;
+  onWrong:        (id: number) => void;
+  onRemoveWrong:  (id: number) => void;
+  onClearWrong:   () => void;
+  onWordsStudied: () => void;
+  onBack:         () => void;
 }
 
 const tabs: { id: Tab; label: string; icon: string }[] = [
@@ -44,7 +45,7 @@ const tabs: { id: Tab; label: string; icon: string }[] = [
 
 export default function EikaiwaMode({
   vocabulary, phrases, reviewItems, onToggle, onRemove, isInList, history,
-  wrongIds, onWrong, onRemoveWrong, onClearWrong, onBack,
+  wrongIds, onWrong, onRemoveWrong, onClearWrong, onWordsStudied, onBack,
 }: Props) {
   const ewVocab   = vocabulary.filter((w) => w.level === "中学" || w.level === "高校");
   const ewPhrases = phrases;
@@ -351,7 +352,7 @@ export default function EikaiwaMode({
                 </p>
               </div>
             ) : (
-              <Quiz key={quizKey} words={quizWords} pool={ewVocab} mode="eikaiwa" onWrong={onWrong} />
+              <Quiz key={quizKey} words={quizWords} pool={ewVocab} mode="eikaiwa" onWrong={onWrong} onCorrect={onWordsStudied} />
             )}
 
             {/* 苦手単語リスト */}

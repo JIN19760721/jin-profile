@@ -70,18 +70,19 @@ interface Props {
   isInList:      (type: ReviewItemType, id: number) => boolean;
   history:       StudyHistory;
   addRecord:     (r: Omit<import("../hooks/useStudyHistory").QuizRecord, "date">) => void;
-  wrongIds:      Set<number>;
-  onWrong:       (id: number) => void;
-  onRemoveWrong: (id: number) => void;
-  onClearWrong:  () => void;
-  onBack:        () => void;
+  wrongIds:       Set<number>;
+  onWrong:        (id: number) => void;
+  onRemoveWrong:  (id: number) => void;
+  onClearWrong:   () => void;
+  onWordsStudied: () => void;
+  onBack:         () => void;
 }
 
 type QuizSource = "all" | "wrong";
 
 export default function TOEICMode({
   vocabulary, phrases, reviewItems, onToggle, onRemove, isInList, history, addRecord,
-  wrongIds, onWrong, onRemoveWrong, onClearWrong, onBack,
+  wrongIds, onWrong, onRemoveWrong, onClearWrong, onWordsStudied, onBack,
 }: Props) {
   const toeicVocab = vocabulary.filter((w) =>
     w.level === "TOEIC600" || w.level === "TOEIC730" || w.level === "TOEIC860"
@@ -269,6 +270,7 @@ export default function TOEICMode({
                 </div>
               ) : (
                 <Quiz key={quizKey} words={quizWords} pool={toeicVocab} mode="toeic" onWrong={onWrong}
+                  onCorrect={onWordsStudied}
                   onComplete={(score, total) => addRecord({ mode: "toeic", level: tLevel, score, total })} />
               )}
 
@@ -334,6 +336,7 @@ export default function TOEICMode({
               isInList={isInList} onToggle={onToggle}
               onBack={() => setSelPart(null)}
               addRecord={addRecord}
+              onWordsStudied={onWordsStudied}
             />
           )
         )}
@@ -363,6 +366,7 @@ export default function TOEICMode({
               newMock();
             }}
             onNewTest={newMock}
+            onWordsStudied={onWordsStudied}
           />
         )}
 
@@ -528,13 +532,14 @@ function TOEICPartsMenu({ onSelect }: { onSelect: (i: number) => void }) {
   );
 }
 
-function TOEICPartDetail({ part, vocab, isInList, onToggle, onBack, addRecord }: {
+function TOEICPartDetail({ part, vocab, isInList, onToggle, onBack, addRecord, onWordsStudied }: {
   part: typeof PART_INFO[number];
   vocab: Word[];
   isInList: (type: ReviewItemType, id: number) => boolean;
   onToggle: (type: ReviewItemType, id: number) => void;
   onBack: () => void;
   addRecord: (r: Omit<import("../hooks/useStudyHistory").QuizRecord, "date">) => void;
+  onWordsStudied?: () => void;
 }) {
   const [showPractice, setShowPractice] = useState(false);
   const [practiceWords] = useState(() => pickRandom(vocab, SESSION));
@@ -585,6 +590,7 @@ function TOEICPartDetail({ part, vocab, isInList, onToggle, onBack, addRecord }:
                 </button>
               </div>
               <Quiz key={practiceKey} words={practiceWords} pool={vocab} mode="toeic" part5Style
+                onCorrect={onWordsStudied}
                 onComplete={(score, total) => addRecord({ mode: "toeic", level: "Part5", score, total })} />
             </>
           )}
@@ -594,11 +600,12 @@ function TOEICPartDetail({ part, vocab, isInList, onToggle, onBack, addRecord }:
   );
 }
 
-function TOEICMockTest({ words, pool, onComplete, onNewTest }: {
+function TOEICMockTest({ words, pool, onComplete, onNewTest, onWordsStudied }: {
   words: Word[];
   pool: Word[];
   onComplete: (score: number, total: number) => void;
   onNewTest: () => void;
+  onWordsStudied?: () => void;
 }) {
   const TOTAL_TIME = 20 * 60; // 20分
   const [started,  setStarted]  = useState(false);
@@ -705,6 +712,7 @@ function TOEICMockTest({ words, pool, onComplete, onNewTest }: {
         </div>
       </div>
       <Quiz key={quizKey} words={words} pool={pool} mode="toeic" mockMode
+        onCorrect={onWordsStudied}
         onComplete={(s) => { setScore(s); setFinished(true); }} />
     </div>
   );

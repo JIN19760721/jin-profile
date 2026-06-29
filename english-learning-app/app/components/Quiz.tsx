@@ -10,6 +10,7 @@ interface QuizProps {
   mockMode?:   boolean;
   onComplete?: (score: number, total: number) => void;
   onWrong?:    (wordId: number) => void;
+  onCorrect?:  () => void;
 }
 
 function shuffle<T>(arr: T[]): T[] {
@@ -34,7 +35,7 @@ function makePart5Question(word: Word): string {
   return blanked;
 }
 
-export default function Quiz({ words, pool, mode = "eikaiwa", part5Style = false, mockMode = false, onComplete, onWrong }: QuizProps) {
+export default function Quiz({ words, pool, mode = "eikaiwa", part5Style = false, mockMode = false, onComplete, onWrong, onCorrect }: QuizProps) {
   const distPool = pool && pool.length >= 4 ? pool : words;
   const [questionWords, setQuestionWords] = useState(() => shuffle(words));
   const [qIndex,   setQIndex]   = useState(0);
@@ -51,7 +52,7 @@ export default function Quiz({ words, pool, mode = "eikaiwa", part5Style = false
     if (selected !== null) return;
     setSelected(idx);
     const correct = options[idx].id === target.id;
-    if (correct) setScore((s) => s + 1);
+    if (correct) { setScore((s) => s + 1); onCorrect?.(); }
     else onWrong?.(target.id);
   };
 
@@ -72,7 +73,7 @@ export default function Quiz({ words, pool, mode = "eikaiwa", part5Style = false
     if (selected !== null) return;
     const correct = options[idx].id === target.id;
     setSelected(idx);
-    if (correct) setScore((s) => s + 1);
+    if (correct) { setScore((s) => s + 1); onCorrect?.(); }
     else onWrong?.(target.id);
     if (mockMode) setTimeout(handleNext, 600);
   };
