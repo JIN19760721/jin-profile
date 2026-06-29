@@ -357,7 +357,7 @@ export default function TOEICMode({
         {/* ── 模試 ────────────────────────────────────── */}
         {activeTab === "mock" && (
           <TOEICMockTest
-            key={mockKey} words={mockWords}
+            key={mockKey} words={mockWords} pool={toeicVocab}
             onComplete={(score, total) => {
               addRecord({ mode: "toeic", level: "模試", score, total });
               newMock();
@@ -594,8 +594,9 @@ function TOEICPartDetail({ part, vocab, isInList, onToggle, onBack, addRecord }:
   );
 }
 
-function TOEICMockTest({ words, onComplete, onNewTest }: {
+function TOEICMockTest({ words, pool, onComplete, onNewTest }: {
   words: Word[];
+  pool: Word[];
   onComplete: (score: number, total: number) => void;
   onNewTest: () => void;
 }) {
@@ -703,7 +704,7 @@ function TOEICMockTest({ words, onComplete, onNewTest }: {
                         transition: "width 1s linear, background 0.5s" }} />
         </div>
       </div>
-      <Quiz key={quizKey} words={words} mode="toeic" mockMode
+      <Quiz key={quizKey} words={words} pool={pool} mode="toeic" mockMode
         onComplete={(s) => { setScore(s); setFinished(true); }} />
     </div>
   );
