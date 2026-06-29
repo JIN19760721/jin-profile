@@ -1,6 +1,6 @@
 "use client";
 
-type AppMode = "eikaiwa" | "toeic" | "dictionary";
+type AppMode = "eikaiwa" | "toeic" | "dictionary" | "ranking";
 
 interface Props {
   onSelect: (mode: AppMode) => void;
@@ -95,8 +95,30 @@ export default function ModeSelect({ onSelect }: Props) {
               辞書モード
             </p>
             <p style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
-              11,978語を英語・日本語で検索<br />
+              11,292語を英語・日本語で検索<br />
               授業中や学習時に分からない単語を調べる
+            </p>
+          </div>
+          <span style={{ color: "#475569", fontSize: 20 }}>›</span>
+        </button>
+
+        {/* ランキング */}
+        <button onClick={() => onSelect("ranking")}
+          style={{
+            background: "#1e293b",
+            border: "1px solid #334155",
+            borderRadius: 20, padding: "18px 20px",
+            cursor: "pointer", textAlign: "left", color: "#fff",
+            display: "flex", alignItems: "center", gap: 14,
+          }}>
+          <span style={{ fontSize: 34 }}>🏆</span>
+          <div style={{ flex: 1 }}>
+            <p style={{ fontSize: 17, fontWeight: 700, color: "#e2e8f0", marginBottom: 3 }}>
+              ランキング
+            </p>
+            <p style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
+              正解率・継続日数・学習語数を競おう<br />
+              グループ内で4つのランキングを集計
             </p>
           </div>
           <span style={{ color: "#475569", fontSize: 20 }}>›</span>
