@@ -3,6 +3,13 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
+function currentKey(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `rankings:${y}-${m}`;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -22,10 +29,10 @@ export async function POST(req: NextRequest) {
     }
 
     const data = {
-      nickname: name,
-      quizAvg:    Math.round(Math.max(0, Math.min(100, Number(quizAvg) || 0)) * 10) / 10,
-      streak:     Math.max(0, Math.floor(Number(streak) || 0)),
-      totalWords: Math.max(0, Math.floor(Number(totalWords) || 0)),
+      nickname:    name,
+      quizAvg:     Math.round(Math.max(0, Math.min(100, Number(quizAvg) || 0)) * 10) / 10,
+      streak:      Math.max(0, Math.floor(Number(streak) || 0)),
+      totalWords:  Math.max(0, Math.floor(Number(totalWords) || 0)),
       lastUpdated: new Date().toISOString().split("T")[0],
     };
 
@@ -34,7 +41,7 @@ export async function POST(req: NextRequest) {
       token: process.env.UPSTASH_REDIS_REST_TOKEN!,
     });
 
-    await redis.hset("rankings", { [name]: JSON.stringify(data) });
+    await redis.hset(currentKey(), { [name]: JSON.stringify(data) });
     return NextResponse.json({ ok: true });
   } catch (e) {
     console.error("[ranking submit]", e);
