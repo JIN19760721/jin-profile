@@ -12,7 +12,21 @@ interface Rankings {
   totalWords: RankedEntry[];
   overall:    OverallEntry[];
 }
-interface RankData { users: unknown[]; rankings: Rankings | null; }
+interface PrevChampions {
+  overall:    OverallEntry    | null;
+  quizAvg:    RankedEntry     | null;
+  streak:     RankedEntry     | null;
+  totalWords: RankedEntry     | null;
+}
+interface RankData {
+  month:          string;
+  monthLabel:     string;
+  prevMonth:      string;
+  prevMonthLabel: string;
+  users:          unknown[];
+  rankings:       Rankings | null;
+  prevChampions:  PrevChampions | null;
+}
 
 const TABS: { id: RankTab; label: string; icon: string }[] = [
   { id: "overall",    label: "総合",    icon: "🏆" },
@@ -36,8 +50,8 @@ interface Props {
 }
 
 export default function RankingMode({ history, onBack }: Props) {
-  const [nickname,        setNicknameState]  = useState<string | null>(null);
-  const [nicknameInput,   setNicknameInput]  = useState("");
+  const [nickname,        setNicknameState]   = useState<string | null>(null);
+  const [nicknameInput,   setNicknameInput]   = useState("");
   const [editingNickname, setEditingNickname] = useState(false);
   const [tab,             setTab]             = useState<RankTab>("overall");
   const [data,            setData]            = useState<RankData | null>(null);
@@ -79,7 +93,6 @@ export default function RankingMode({ history, onBack }: Props) {
     setNicknameInput("");
   };
 
-  // 全クイズ記録の平均正解率
   const quizAvg = (() => {
     const recs = history.records.filter((r) => r.total > 0);
     if (!recs.length) return 0;
@@ -129,7 +142,14 @@ export default function RankingMode({ history, onBack }: Props) {
                      fontSize: 16, flexShrink: 0, lineHeight: 1 }}>
             ‹
           </button>
-          <h1 style={{ fontSize: 17, fontWeight: 700 }}>🏆 ランキング</h1>
+          <div>
+            <h1 style={{ fontSize: 17, fontWeight: 700, lineHeight: 1 }}>🏆 ランキング</h1>
+            {data?.monthLabel && (
+              <p style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
+                {data.monthLabel}集計
+              </p>
+            )}
+          </div>
         </div>
         {nickname && !editingNickname && (
           <button
@@ -186,6 +206,14 @@ export default function RankingMode({ history, onBack }: Props) {
           </div>
         )}
 
+        {/* 先月のチャンピオン */}
+        {data?.prevChampions && (
+          <PrevChampionCard
+            label={data.prevMonthLabel}
+            champions={data.prevChampions}
+          />
+        )}
+
         {/* タブ */}
         <div style={{ display: "flex", background: "#1e293b", borderRadius: 12, padding: 4, gap: 2 }}>
           {TABS.map((t) => (
@@ -229,7 +257,7 @@ export default function RankingMode({ history, onBack }: Props) {
           <div style={{ background: "#1e293b", border: "1px solid #334155",
                         borderRadius: 16, padding: 16 }}>
             <p style={{ color: "#94a3b8", fontSize: 13, fontWeight: 600, marginBottom: 12 }}>
-              📊 あなたの現在のスコア
+              📊 あなたの今月のスコア
             </p>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 14 }}>
               {[
@@ -271,6 +299,59 @@ export default function RankingMode({ history, onBack }: Props) {
   );
 }
 
+// ── 先月のチャンピオン ──────────────────────────────────────
+
+function PrevChampionCard({ label, champions }: {
+  label:     string;
+  champions: PrevChampions;
+}) {
+  const rows: { icon: string; cat: string; entry: RankedEntry | OverallEntry | null }[] = [
+    { icon: "🏆", cat: "総合",    entry: champions.overall },
+    { icon: "🎯", cat: "正解率",  entry: champions.quizAvg },
+    { icon: "🔥", cat: "継続日数", entry: champions.streak },
+    { icon: "📖", cat: "学習語数", entry: champions.totalWords },
+  ];
+
+  const formatChampValue = (cat: string, entry: RankedEntry | OverallEntry) => {
+    if (cat === "総合")    return (entry as OverallEntry).totalPoints + "pt";
+    const e = entry as RankedEntry;
+    if (cat === "正解率")  return e.value.toFixed(1) + "%";
+    if (cat === "継続日数") return e.value + "日";
+    if (cat === "学習語数") return e.value.toLocaleString() + "語";
+    return "";
+  };
+
+  return (
+    <div style={{
+      background: "linear-gradient(135deg,rgba(251,191,36,0.08),rgba(245,158,11,0.04))",
+      border: "1px solid rgba(251,191,36,0.3)",
+      borderRadius: 16, padding: 16,
+    }}>
+      <p style={{ color: "#fbbf24", fontSize: 13, fontWeight: 700, marginBottom: 12 }}>
+        👑 先月のチャンピオン（{label}）
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {rows.map(({ icon, cat, entry }) =>
+          entry ? (
+            <div key={cat}
+              style={{ display: "flex", alignItems: "center", gap: 10,
+                       background: "rgba(0,0,0,0.2)", borderRadius: 10, padding: "8px 12px" }}>
+              <span style={{ fontSize: 16, width: 22, textAlign: "center" }}>{icon}</span>
+              <span style={{ color: "#94a3b8", fontSize: 12, width: 54 }}>{cat}</span>
+              <span style={{ flex: 1, color: "#fde68a", fontWeight: 700, fontSize: 14 }}>
+                🥇 {entry.nickname}
+              </span>
+              <span style={{ color: "#94a3b8", fontSize: 12 }}>
+                {formatChampValue(cat, entry)}
+              </span>
+            </div>
+          ) : null
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── 空状態 ─────────────────────────────────────────────────
 
 function EmptyState() {
@@ -281,7 +362,7 @@ function EmptyState() {
     }}>
       <p style={{ fontSize: 48, marginBottom: 12 }}>🏆</p>
       <p style={{ color: "#e2e8f0", fontSize: 16, fontWeight: 700, marginBottom: 6 }}>
-        まだランキングがありません
+        今月のランキングがありません
       </p>
       <p style={{ color: "#64748b", fontSize: 13, lineHeight: 1.7 }}>
         ニックネームを登録して<br />「ランキングを更新」を押しましょう！
@@ -304,18 +385,17 @@ function RankList({ tab, rankings, myNickname }: {
         <p style={{ color: "#64748b", fontSize: 11, textAlign: "right" }}>
           最高得点: {maxPt}pt
         </p>
-        {rankings.overall.map((e) => {
-          const isMine = e.nickname === myNickname;
-          return (
-            <RankRow key={e.nickname} rank={e.rank} nickname={e.nickname} isMine={isMine}
-              right={
-                <span style={{ color: "#fbbf24", fontWeight: 800, fontSize: 17 }}>
-                  {e.totalPoints}<span style={{ color: "#64748b", fontSize: 11, fontWeight: 400 }}>pt</span>
-                </span>
-              }
-            />
-          );
-        })}
+        {rankings.overall.map((e) => (
+          <RankRow key={e.nickname} rank={e.rank} nickname={e.nickname}
+            isMine={e.nickname === myNickname}
+            right={
+              <span style={{ color: "#fbbf24", fontWeight: 800, fontSize: 17 }}>
+                {e.totalPoints}
+                <span style={{ color: "#64748b", fontSize: 11, fontWeight: 400 }}>pt</span>
+              </span>
+            }
+          />
+        ))}
       </div>
     );
   }
@@ -327,24 +407,22 @@ function RankList({ tab, rankings, myNickname }: {
       <p style={{ color: "#64748b", fontSize: 11 }}>
         {tabInfo.icon} {tabInfo.label}ランキング
       </p>
-      {entries.map((e) => {
-        const isMine = e.nickname === myNickname;
-        return (
-          <RankRow key={e.nickname} rank={e.rank} nickname={e.nickname} isMine={isMine}
-            right={
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ color: "#94a3b8", fontSize: 13 }}>
-                  {formatValue(tab, e.value)}
-                </span>
-                <span style={{ background: "#334155", color: "#94a3b8",
-                               fontSize: 10, padding: "2px 8px", borderRadius: 99 }}>
-                  {e.points}pt
-                </span>
-              </div>
-            }
-          />
-        );
-      })}
+      {entries.map((e) => (
+        <RankRow key={e.nickname} rank={e.rank} nickname={e.nickname}
+          isMine={e.nickname === myNickname}
+          right={
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ color: "#94a3b8", fontSize: 13 }}>
+                {formatValue(tab, e.value)}
+              </span>
+              <span style={{ background: "#334155", color: "#94a3b8",
+                             fontSize: 10, padding: "2px 8px", borderRadius: 99 }}>
+                {e.points}pt
+              </span>
+            </div>
+          }
+        />
+      ))}
     </div>
   );
 }
