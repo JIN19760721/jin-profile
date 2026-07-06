@@ -10,16 +10,18 @@ export interface QuizRecord {
 }
 
 export interface StudyHistory {
-  records:           QuizRecord[];
-  streak:            number;
-  lastStudyDate:     string | null;
-  totalWordsStudied: number;
+  records:             QuizRecord[];
+  streak:              number;
+  lastStudyDate:       string | null;
+  totalWordsStudied:   number;
+  monthlyWordsStudied: Record<string, number>; // { "YYYY-MM": count }
 }
 
 const STORAGE_KEY = "study_history_v1";
 
 const defaultHistory: StudyHistory = {
-  records: [], streak: 0, lastStudyDate: null, totalWordsStudied: 0,
+  records: [], streak: 0, lastStudyDate: null,
+  totalWordsStudied: 0, monthlyWordsStudied: {},
 };
 
 function today()     { return new Date().toISOString().split("T")[0]; }
@@ -57,11 +59,14 @@ export function useStudyHistory() {
   };
 
   const addWordsStudied = (n: number) => {
+    const month   = new Date().toISOString().slice(0, 7);
+    const monthly = history.monthlyWordsStudied ?? {};
     save({
       ...history,
-      totalWordsStudied: history.totalWordsStudied + n,
-      streak:            calcStreak(history),
-      lastStudyDate:     today(),
+      totalWordsStudied:   history.totalWordsStudied + n,
+      monthlyWordsStudied: { ...monthly, [month]: (monthly[month] ?? 0) + n },
+      streak:              calcStreak(history),
+      lastStudyDate:       today(),
     });
   };
 

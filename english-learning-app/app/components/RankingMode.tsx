@@ -93,14 +93,17 @@ export default function RankingMode({ history, onBack }: Props) {
     setNicknameInput("");
   };
 
+  const thisMonth = new Date().toISOString().slice(0, 7); // "YYYY-MM"
+
   const quizAvg = (() => {
-    const thisMonth = new Date().toISOString().slice(0, 7); // "YYYY-MM"
     const recs = history.records.filter((r) => r.total > 0 && r.date.startsWith(thisMonth));
     if (!recs.length) return 0;
-    const totalScore = recs.reduce((s, r) => s + r.score, 0);
+    const totalScore     = recs.reduce((s, r) => s + r.score, 0);
     const totalQuestions = recs.reduce((s, r) => s + r.total, 0);
     return (totalScore / totalQuestions) * 100;
   })();
+
+  const monthlyWords = (history.monthlyWordsStudied ?? {})[thisMonth] ?? 0;
 
   const submitScore = async () => {
     if (!nickname) return;
@@ -114,7 +117,7 @@ export default function RankingMode({ history, onBack }: Props) {
           nickname,
           quizAvg:    Math.round(quizAvg * 10) / 10,
           streak:     history.streak,
-          totalWords: history.totalWordsStudied,
+          totalWords: monthlyWords,
         }),
       });
       const json = await res.json();
@@ -266,7 +269,7 @@ export default function RankingMode({ history, onBack }: Props) {
               {[
                 { icon: "🎯", label: "正解率",   value: quizAvg.toFixed(1) + "%" },
                 { icon: "🔥", label: "継続日数", value: history.streak + "日" },
-                { icon: "📖", label: "累計語数", value: history.totalWordsStudied.toLocaleString() + "語" },
+                { icon: "📖", label: "今月の語数", value: monthlyWords.toLocaleString() + "語" },
               ].map(({ icon, label, value }) => (
                 <div key={label}
                   style={{ background: "#0f172a", borderRadius: 12, padding: "10px 8px", textAlign: "center" }}>
