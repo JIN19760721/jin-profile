@@ -94,9 +94,12 @@ export default function RankingMode({ history, onBack }: Props) {
   };
 
   const quizAvg = (() => {
-    const recs = history.records.filter((r) => r.total > 0);
+    const thisMonth = new Date().toISOString().slice(0, 7); // "YYYY-MM"
+    const recs = history.records.filter((r) => r.total > 0 && r.date.startsWith(thisMonth));
     if (!recs.length) return 0;
-    return (recs.reduce((s, r) => s + r.score / r.total, 0) / recs.length) * 100;
+    const totalScore = recs.reduce((s, r) => s + r.score, 0);
+    const totalQuestions = recs.reduce((s, r) => s + r.total, 0);
+    return (totalScore / totalQuestions) * 100;
   })();
 
   const submitScore = async () => {
