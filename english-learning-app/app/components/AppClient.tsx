@@ -59,6 +59,7 @@ export default function AppClient({ vocabulary, phrases }: Props) {
         onRemove={remove}
         isInList={isInList}
         history={history}
+        addRecord={addRecord}
         wrongIds={wrongIds}
         onWrong={addWrong}
         onRemoveWrong={removeWrong}

@@ -27,6 +27,7 @@ interface Props {
   onRemove:      (type: ReviewItemType, id: number) => void;
   isInList:      (type: ReviewItemType, id: number) => boolean;
   history:       StudyHistory;
+  addRecord:     (r: Omit<import("../hooks/useStudyHistory").QuizRecord, "date">) => void;
   wrongIds:       Set<number>;
   onWrong:        (id: number) => void;
   onRemoveWrong:  (id: number) => void;
@@ -44,7 +45,7 @@ const tabs: { id: Tab; label: string; icon: string }[] = [
 ];
 
 export default function EikaiwaMode({
-  vocabulary, phrases, reviewItems, onToggle, onRemove, isInList, history,
+  vocabulary, phrases, reviewItems, onToggle, onRemove, isInList, history, addRecord,
   wrongIds, onWrong, onRemoveWrong, onClearWrong, onWordsStudied, onBack,
 }: Props) {
   const ewVocab   = vocabulary.filter((w) => w.level === "中学" || w.level === "高校");
@@ -352,7 +353,13 @@ export default function EikaiwaMode({
                 </p>
               </div>
             ) : (
-              <Quiz key={quizKey} words={quizWords} pool={ewVocab} mode="eikaiwa" onWrong={onWrong} onCorrect={onWordsStudied} />
+              <Quiz key={quizKey} words={quizWords} pool={ewVocab} mode="eikaiwa"
+                onWrong={onWrong} onCorrect={onWordsStudied}
+                onComplete={(score, total) => addRecord({
+                  mode: "eikaiwa",
+                  level: quizSource === "wrong" ? "苦手" : filter === "全て" ? "英会話" : filter,
+                  score, total,
+                })} />
             )}
 
             {/* 苦手単語リスト */}
