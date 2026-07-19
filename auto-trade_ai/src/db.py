@@ -27,7 +27,12 @@ def init_db(db_path: Path = DB_PATH) -> None:
             filled_price REAL,
             created_at   TEXT NOT NULL,
             dry_run      INTEGER DEFAULT 0,
-            entry_path   TEXT DEFAULT 'A'
+            entry_path   TEXT DEFAULT 'A',
+            entry_score               REAL,
+            entry_surge_score         REAL,
+            entry_surge_signal        TEXT,
+            entry_surge_confirm_count INTEGER,
+            entry_reasons             TEXT
         );
 
         CREATE TABLE IF NOT EXISTS positions (
@@ -45,7 +50,13 @@ def init_db(db_path: Path = DB_PATH) -> None:
             pnl            REAL,
             pnl_pct        REAL,
             dry_run        INTEGER DEFAULT 0,
-            entry_path     TEXT DEFAULT 'A'
+            entry_path     TEXT DEFAULT 'A',
+            max_pnl_pct    REAL,
+            entry_score               REAL,
+            entry_surge_score         REAL,
+            entry_surge_signal        TEXT,
+            entry_surge_confirm_count INTEGER,
+            entry_reasons             TEXT
         );
 
         CREATE TABLE IF NOT EXISTS daily_summary (
@@ -119,16 +130,33 @@ def _migrate_daily_candidates(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE daily_candidates ADD COLUMN {col} {typ}")
 
 
+_ENTRY_SIGNAL_COLUMNS = [
+    ("entry_score",               "REAL"),
+    ("entry_surge_score",         "REAL"),
+    ("entry_surge_signal",        "TEXT"),
+    ("entry_surge_confirm_count", "INTEGER"),
+    ("entry_reasons",             "TEXT"),
+]
+
+
 def _migrate_orders(conn: sqlite3.Connection) -> None:
     existing = {row[1] for row in conn.execute("PRAGMA table_info(orders)")}
     if "entry_path" not in existing:
         conn.execute("ALTER TABLE orders ADD COLUMN entry_path TEXT DEFAULT 'A'")
+    for col, typ in _ENTRY_SIGNAL_COLUMNS:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE orders ADD COLUMN {col} {typ}")
 
 
 def _migrate_positions(conn: sqlite3.Connection) -> None:
     existing = {row[1] for row in conn.execute("PRAGMA table_info(positions)")}
     if "entry_path" not in existing:
         conn.execute("ALTER TABLE positions ADD COLUMN entry_path TEXT DEFAULT 'A'")
+    if "max_pnl_pct" not in existing:
+        conn.execute("ALTER TABLE positions ADD COLUMN max_pnl_pct REAL")
+    for col, typ in _ENTRY_SIGNAL_COLUMNS:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE positions ADD COLUMN {col} {typ}")
 
 
 def _migrate_positions_drop_symbol_unique(conn: sqlite3.Connection) -> None:
@@ -163,18 +191,28 @@ def _migrate_positions_drop_symbol_unique(conn: sqlite3.Connection) -> None:
             pnl            REAL,
             pnl_pct        REAL,
             dry_run        INTEGER DEFAULT 0,
-            entry_path     TEXT DEFAULT 'A'
+            entry_path     TEXT DEFAULT 'A',
+            max_pnl_pct    REAL,
+            entry_score               REAL,
+            entry_surge_score         REAL,
+            entry_surge_signal        TEXT,
+            entry_surge_confirm_count INTEGER,
+            entry_reasons             TEXT
         );
 
         INSERT INTO positions (
             id, symbol, symbol_name, qty, entry_price, entry_order_id,
             status, opened_at, closed_at, close_price, close_reason,
-            pnl, pnl_pct, dry_run, entry_path
+            pnl, pnl_pct, dry_run, entry_path, max_pnl_pct,
+            entry_score, entry_surge_score, entry_surge_signal,
+            entry_surge_confirm_count, entry_reasons
         )
         SELECT
             id, symbol, symbol_name, qty, entry_price, entry_order_id,
             status, opened_at, closed_at, close_price, close_reason,
-            pnl, pnl_pct, dry_run, entry_path
+            pnl, pnl_pct, dry_run, entry_path, max_pnl_pct,
+            entry_score, entry_surge_score, entry_surge_signal,
+            entry_surge_confirm_count, entry_reasons
         FROM positions_pre_migration;
 
         DROP TABLE positions_pre_migration;
@@ -216,16 +254,25 @@ def insert_order(
     ordered_at: str,
     dry_run: bool = False,
     entry_path: str = "A",
+    entry_signal: dict | None = None,
     db_path: Path = DB_PATH,
 ) -> None:
+    """entry_signal: エントリー時点のスコア・surge値のスナップショット。
+    {"score", "surge_score", "surge_signal", "surge_confirm_count", "reasons"} を想定（買い注文のみ）。
+    """
+    sig = entry_signal or {}
     with _connect(db_path) as conn:
         conn.execute(
             """INSERT OR REPLACE INTO orders
                (order_id, symbol, symbol_name, side, qty, price, status,
-                ordered_at, created_at, dry_run, entry_path)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ordered_at, created_at, dry_run, entry_path,
+                entry_score, entry_surge_score, entry_surge_signal,
+                entry_surge_confirm_count, entry_reasons)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (order_id, symbol, symbol_name, side, qty, price, status,
-             ordered_at, _now(), int(dry_run), entry_path),
+             ordered_at, _now(), int(dry_run), entry_path,
+             sig.get("score"), sig.get("surge_score"), sig.get("surge_signal"),
+             sig.get("surge_confirm_count"), sig.get("reasons")),
         )
 
 
@@ -272,16 +319,25 @@ def insert_position(
     entry_order_id: str,
     dry_run: bool = False,
     entry_path: str = "A",
+    entry_signal: dict | None = None,
     db_path: Path = DB_PATH,
 ) -> None:
+    """entry_signal: エントリー時点のスコア・surge値のスナップショット。
+    {"score", "surge_score", "surge_signal", "surge_confirm_count", "reasons"} を想定。
+    """
+    sig = entry_signal or {}
     with _connect(db_path) as conn:
         conn.execute(
             """INSERT INTO positions
                (symbol, symbol_name, qty, entry_price, entry_order_id,
-                status, opened_at, dry_run, entry_path)
-               VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, ?)""",
+                status, opened_at, dry_run, entry_path,
+                entry_score, entry_surge_score, entry_surge_signal,
+                entry_surge_confirm_count, entry_reasons)
+               VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?)""",
             (symbol, symbol_name, qty, entry_price, entry_order_id,
-             _now(), int(dry_run), entry_path),
+             _now(), int(dry_run), entry_path,
+             sig.get("score"), sig.get("surge_score"), sig.get("surge_signal"),
+             sig.get("surge_confirm_count"), sig.get("reasons")),
         )
 
 
@@ -310,6 +366,39 @@ def close_position(
                WHERE symbol=? AND status='OPEN'""",
             (_now(), close_price, close_reason, pnl, pnl_pct, symbol),
         )
+
+
+def update_position_max_pnl_pct(
+    symbol: str,
+    pnl_pct: float,
+    dry_run: bool = False,
+    db_path: Path = DB_PATH,
+) -> None:
+    """OPEN ポジションの当日最大含み益率を更新する（キープゾーン検証用の観測データ）。"""
+    with _connect(db_path) as conn:
+        conn.execute(
+            """UPDATE positions
+               SET max_pnl_pct = MAX(COALESCE(max_pnl_pct, ?), ?)
+               WHERE symbol=? AND status='OPEN' AND dry_run=?""",
+            (pnl_pct, pnl_pct, symbol, int(dry_run)),
+        )
+
+
+def get_last_closed_time_today(
+    symbol: str,
+    dry_run: bool = False,
+    db_path: Path = DB_PATH,
+) -> str | None:
+    """当日のその銘柄の直近クローズ時刻を返す（同一銘柄再エントリークールダウン判定用）。"""
+    today = _today()
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            """SELECT closed_at FROM positions
+               WHERE symbol=? AND status='CLOSED' AND DATE(closed_at)=? AND dry_run=?
+               ORDER BY closed_at DESC LIMIT 1""",
+            (symbol, today, int(dry_run)),
+        ).fetchone()
+    return row[0] if row else None
 
 
 def get_today_closed_positions(dry_run: bool = False, db_path: Path = DB_PATH) -> list[dict]:

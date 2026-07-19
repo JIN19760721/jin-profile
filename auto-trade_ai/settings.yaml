@@ -1,0 +1,57 @@
+trade:
+  capital: 100000               # 運用資金（円）
+  order_qty: 100                # 1回あたりの発注株数
+  max_positions: 5              # 最大同時保有銘柄数
+  stop_loss_pct: -3.0           # 経路A 損切りライン（%）
+  stop_loss_pct_b: -2.0         # 経路B 損切りライン（%、タイト）
+  stop_loss_pct_c: -1.5         # 経路C 損切りライン（%、超タイト）
+  take_profit_pct: 8.0          # 経路A 利確ライン（%）。この水準を超えたらキープゾーンへ
+  take_profit_pct_b: 5.0        # 経路B 利確ライン（%、早め）
+  take_profit_pct_c: 3.0        # 経路C 利確ライン（%、即利確）
+  take_profit_rci_threshold: 80.0  # キープゾーン中にRCIがこの値以上で利確
+  take_profit_trailing_pct: 3.0    # キープゾーン中に高値からこれだけ押したら強制利確
+  order_timeout_minutes: 3      # 指値注文タイムアウト（未約定でキャンセル）
+  polling_interval_seconds: 60  # 新規エントリー探索（ランキング取得・surge評価）の間隔
+  position_check_interval_seconds: 10  # 保有ポジションの損切り/利確監視の間隔（60秒だと損切りラインの超過が大きくなるため）
+  pre_market_yfinance_time: "08:00" # yfinance 前日データによる事前スキャン時刻
+  pre_market_scan_time: "08:57" # kabu station ランキングによる寄り付き前スキャン時刻
+  force_close_time: "15:20"     # 強制全ポジション決済時刻
+  min_score_to_enter: 60.0      # この score 以上の銘柄のみエントリー対象
+  daily_loss_limit: -30000      # 日次損失上限（円）。超過したら新規発注停止
+  reentry_cooldown_minutes: 60  # 同一銘柄を当日決済後、再エントリーまでの待機時間（分）。0で無効
+  cash_margin: 1                # 1=現物, 2=信用
+  account_type: 4               # 4=特定口座
+  exchange: "TP"                # 取引所フィルタ
+  trading_sessions:
+    - start: "09:00"
+      end:   "11:30"
+    - start: "12:30"
+      end:   "15:20"
+  entry_embargo_minutes: 15     # 各セッション開始直後の様子見期間（分）。0で無効。
+                                 # 過去実績: セッション開始15分以内のエントリーは5戦0勝(-3,740円)、
+                                 # 15分超は7戦1勝(-1,800円)。板の薄さ・フェイク値動きが原因と推定。
+
+surge:
+  use_surge_score_filter: true  # false にすると score>=60 のみでエントリー（従来動作）
+  min_surge_score: 70.0         # 経路A: score>=60 銘柄に必要な最低 surge_score
+  surge_strong_score: 85.0      # SURGE_STRONG 閾値
+  surge_candidate_score: 70.0   # SURGE_CANDIDATE 閾値
+  surge_watch_score: 50.0       # SURGE_WATCH 閾値
+  surge_notify_delta: 10.0      # この値以上変化した場合のみ LINE 通知
+  surge_notify_enabled: false   # surge 通知を無効化（LINE月200通上限節約）
+  surge_hist_days: 20           # 急増率の比較基準となる過去日数
+  bypass_min_surge: 85.0        # 経路B: score<60 でもエントリー可とする surge 閾値
+  bypass_min_score: 40.0        # 経路B: bypass 時に必要な最低 score
+  order_price_buffer_pct: 0.3   # 発注価格バッファ（%）急騰中の未約定防止
+  pathc_enabled: true           # 経路C 有効/無効
+  pathc_min_surge: 92.0         # 経路C: score不問でエントリー可とする surge 閾値
+  confirm_min: 2                # surge閾値をこの回数連続で超えた場合のみエントリー許可（瞬間値誤エントリー防止）
+
+entry_policy:
+  enabled: true
+  hourly_ma_short: 5
+  hourly_ma_long: 20
+  min1_ma_period: 5
+  rci_period: 9
+  rci_approach_threshold: -80
+  rci_lookback_bars: 10
