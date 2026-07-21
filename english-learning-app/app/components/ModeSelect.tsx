@@ -1,6 +1,6 @@
 "use client";
 
-type AppMode = "eikaiwa" | "toeic" | "dictionary" | "ranking";
+type AppMode = "eikaiwa" | "toeic" | "eiken" | "dictionary" | "ranking";
 
 interface Props {
   onSelect: (mode: AppMode) => void;
@@ -72,6 +72,33 @@ export default function ModeSelect({ onSelect }: Props) {
           </div>
           <div style={{ display: "flex", gap: 6, marginTop: 14, flexWrap: "wrap" }}>
             {["📚 単語学習", "📝 Part1〜7", "🎯 模試", "📈 弱点分析", "❌ 苦手単語"].map((t) => (
+              <span key={t} style={{
+                background: "rgba(255,255,255,0.15)", borderRadius: 99,
+                padding: "3px 9px", fontSize: 10, fontWeight: 600,
+              }}>{t}</span>
+            ))}
+          </div>
+        </button>
+
+        {/* 英検準二級対策モード */}
+        <button onClick={() => onSelect("eiken")}
+          style={{
+            background: "linear-gradient(135deg,#166534,#65a30d)",
+            border: "none", borderRadius: 20, padding: "24px 20px",
+            cursor: "pointer", textAlign: "left", color: "#fff",
+            boxShadow: "0 8px 32px rgba(22,101,52,0.4)",
+          }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <span style={{ fontSize: 38 }}>🎓</span>
+            <div>
+              <p style={{ fontSize: 19, fontWeight: 700, marginBottom: 3 }}>英検準二級対策モード</p>
+              <p style={{ fontSize: 12, color: "#d9f99d", lineHeight: 1.5 }}>
+                大問1〜3の模擬試験をランダム出題<br />過去10回のスコアで実力を確認
+              </p>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 14, flexWrap: "wrap" }}>
+            {["📝 模擬試験", "🔀 10パターン出題", "📊 スコア履歴"].map((t) => (
               <span key={t} style={{
                 background: "rgba(255,255,255,0.15)", borderRadius: 99,
                 padding: "3px 9px", fontSize: 10, fontWeight: 600,
