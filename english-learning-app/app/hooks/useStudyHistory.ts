@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 
 export interface QuizRecord {
   date:  string;                         // YYYY-MM-DD
-  mode:  "eikaiwa" | "toeic";
+  mode:  "eikaiwa" | "toeic" | "eiken";
   level: string;                         // 中学/高校/TOEIC600 など
   score: number;
   total: number;
