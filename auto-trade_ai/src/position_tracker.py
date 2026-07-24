@@ -1,16 +1,21 @@
 """
 ポジション管理・損益計算・損切り/利確判定。
 
-利確ロジック（キープゾーン付き、経路A/Bのみ）:
-  pnl_pct < +8%           → 通常監視
-  pnl_pct ≥ +8% に到達    → キープゾーン突入（以後 pnl_pct が +8% を割り込んでも維持される）
-    ├─ RCI ≥ +80          → 利確（TAKE_PROFIT）
-    ├─ 高値から -3%       → 強制利確（TAKE_PROFIT_TRAIL）
-    └─ それ以外           → キープ継続
-  yfinance 失敗時          → 強制利確（TAKE_PROFIT）
+利確ロジック（経路A/Bのみ。経路Cは即利確でキープゾーン・利益ロックとも対象外）:
 
+  高値時点の含み益(peak_pnl_pct)に応じて防御ライン(floor_pct)が段階的に切り上がる:
+    peak_pnl_pct <  tp_pct * 0.25   → 防御なし（sl_pct のみ = 通常の損切りライン）
+    peak_pnl_pct >= tp_pct * 0.25   → ブレークイーブン確保（floor = breakeven_floor_pct）
+    peak_pnl_pct >= tp_pct * 0.50   → 部分トレーリング（floor = peak_pnl_pct - partial_trail_pct）
+    peak_pnl_pct >= tp_pct          → キープゾーン突入（以後 pnl_pct が tp_pct を割り込んでも維持）
+      ├─ RCI ≥ +80                 → 利確（TAKE_PROFIT）
+      ├─ 高値から -N%               → 強制利確（TAKE_PROFIT_TRAIL）
+      └─ それ以外                   → キープ継続
+
+  ※ tp_pct 到達前は「無防備地帯」対策として floor_pct のみで判定する
+    （TAKE_PROFIT_LOCK）。tp_pct 到達後はキープゾーン側のトレーリング/RCIに一任する。
   ※ キープゾーンは一度到達したら損切りラインに触れるかトレーリング/RCIで
-    決済されるまで維持する（60秒ポーリングの間に pnl_pct が利確ラインを
+    決済されるまで維持する（ポーリングの間に pnl_pct が利確ラインを
     跨いで上下しただけでキープ判定が抜け落ちないようにするため）。
 """
 
@@ -18,6 +23,10 @@ import logging
 
 from src import db
 from src.config import (
+    PROFIT_LOCK_BREAKEVEN_FLOOR_PCT,
+    PROFIT_LOCK_BREAKEVEN_TRIGGER_RATIO,
+    PROFIT_LOCK_PARTIAL_TRAIL_PCT,
+    PROFIT_LOCK_PARTIAL_TRIGGER_RATIO,
     STOP_LOSS_PCT,
     STOP_LOSS_PCT_B,
     STOP_LOSS_PCT_C,
@@ -82,14 +91,25 @@ class PositionTracker:
             # ── 高値を更新 ───────────────────────────────────────────────
             peak = max(self._peak_prices.get(symbol, entry), current)
             self._peak_prices[symbol] = peak
+            peak_pnl_pct = (peak - entry) / entry * 100
 
             # ── キープゾーン到達判定（経路A/Bのみ。一度到達したら維持する）──
             if path != "C" and pnl_pct >= tp_pct:
                 self._keep_zone.add(symbol)
 
-            # ── 損切り ───────────────────────────────────────────────────
-            if pnl_pct <= sl_pct:
-                reason = "STOP_LOSS"
+            # ── 利益ロック床の算出（経路A/Bのみ、tp_pct未到達の間だけ機能）──
+            # tp_pct到達後はキープゾーン側のトレーリング/RCIに一任するため
+            # floor_pctは通常の損切りラインに戻す（二重の決済ロジックが競合しないように）。
+            floor_pct = sl_pct
+            if path != "C" and peak_pnl_pct < tp_pct:
+                if peak_pnl_pct >= tp_pct * PROFIT_LOCK_PARTIAL_TRIGGER_RATIO:
+                    floor_pct = max(floor_pct, peak_pnl_pct - PROFIT_LOCK_PARTIAL_TRAIL_PCT)
+                elif peak_pnl_pct >= tp_pct * PROFIT_LOCK_BREAKEVEN_TRIGGER_RATIO:
+                    floor_pct = max(floor_pct, PROFIT_LOCK_BREAKEVEN_FLOOR_PCT)
+
+            # ── 損切り／利益ロック ───────────────────────────────────────
+            if pnl_pct <= floor_pct:
+                reason = "STOP_LOSS" if floor_pct <= sl_pct else "TAKE_PROFIT_LOCK"
 
             # ── 利確判定 ─────────────────────────────────────────────
             elif path == "C":
@@ -105,7 +125,7 @@ class PositionTracker:
                     continue  # キープ継続
 
             else:
-                log.debug("監視中: %s 損益率 %+.2f%%", symbol, pnl_pct)
+                log.debug("監視中: %s 損益率 %+.2f%% (高値%+.2f%%)", symbol, pnl_pct, peak_pnl_pct)
                 continue
 
             # ── クローズ実行 ─────────────────────────────────────────────

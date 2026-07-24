@@ -65,6 +65,11 @@ STOP_LOSS_PCT: float             = float(_T.get("stop_loss_pct", -3.0))
 TAKE_PROFIT_PCT: float           = float(_T.get("take_profit_pct", 8.0))
 TAKE_PROFIT_RCI_THRESHOLD: float = float(_T.get("take_profit_rci_threshold", 80.0))
 TAKE_PROFIT_TRAILING_PCT: float  = float(_T.get("take_profit_trailing_pct", 3.0))
+# 利益ロック（tp_pct到達前の無防備地帯対策）: tp_pctに対する比率でトリガーが決まる
+PROFIT_LOCK_BREAKEVEN_TRIGGER_RATIO: float = float(_T.get("profit_lock_breakeven_trigger_ratio", 0.25))
+PROFIT_LOCK_BREAKEVEN_FLOOR_PCT: float     = float(_T.get("profit_lock_breakeven_floor_pct", 0.5))
+PROFIT_LOCK_PARTIAL_TRIGGER_RATIO: float   = float(_T.get("profit_lock_partial_trigger_ratio", 0.5))
+PROFIT_LOCK_PARTIAL_TRAIL_PCT: float       = float(_T.get("profit_lock_partial_trail_pct", 2.0))
 ORDER_TIMEOUT_MIN: int      = int(_T.get("order_timeout_minutes", 3))
 POLLING_INTERVAL: int       = int(_T.get("polling_interval_seconds", 60))
 # 保有ポジションの損切り/利確監視の間隔（新規エントリー探索より高頻度に回す）

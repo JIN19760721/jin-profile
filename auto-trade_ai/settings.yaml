@@ -10,6 +10,12 @@ trade:
   take_profit_pct_c: 3.0        # 経路C 利確ライン（%、即利確）
   take_profit_rci_threshold: 80.0  # キープゾーン中にRCIがこの値以上で利確
   take_profit_trailing_pct: 3.0    # キープゾーン中に高値からこれだけ押したら強制利確
+  # 利益ロック（take_profit_pct到達前の無防備地帯対策。経路Cは対象外）
+  # 高値時点の含み益が take_profit_pct * trigger_ratio に達したら防御ラインを引き上げる
+  profit_lock_breakeven_trigger_ratio: 0.25  # ブレークイーブン確保の発動比率
+  profit_lock_breakeven_floor_pct: 0.5       # ブレークイーブン確保時の下限（%）
+  profit_lock_partial_trigger_ratio: 0.5     # 部分トレーリング開始の発動比率
+  profit_lock_partial_trail_pct: 2.0         # 部分トレーリングの許容押し幅（高値からのpt）
   order_timeout_minutes: 3      # 指値注文タイムアウト（未約定でキャンセル）
   polling_interval_seconds: 60  # 新規エントリー探索（ランキング取得・surge評価）の間隔
   position_check_interval_seconds: 10  # 保有ポジションの損切り/利確監視の間隔（60秒だと損切りラインの超過が大きくなるため）
