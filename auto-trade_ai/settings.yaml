@@ -27,7 +27,7 @@ trade:
   reentry_cooldown_minutes: 60  # 同一銘柄を当日決済後、再エントリーまでの待機時間（分）。0で無効
   cash_margin: 1                # 1=現物, 2=信用
   account_type: 4               # 4=特定口座
-  exchange: "TP"                # 取引所フィルタ
+  exchange: "T"                 # 取引所フィルタ（東証全体=プライム+スタンダード+グロース。低位株の発見機会を増やすためプライム限定から拡大）
   trading_sessions:
     - start: "09:00"
       end:   "11:30"
