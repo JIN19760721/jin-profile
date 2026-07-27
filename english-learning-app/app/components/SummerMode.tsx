@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { SUMMER_WORDS, type SummerWord } from "../data/summerWords";
+import { useTTS } from "../hooks/useSpeech";
 import type { SummerProgress } from "../api/summer/progress/route";
 import type { SummerRankEntry } from "../api/summer/ranking/route";
 
@@ -101,6 +102,8 @@ export default function SummerMode({ onBack }: { onBack: () => void }) {
   const [isCorrect,      setIsCorrect]      = useState(false);
   const [sessionAnswers, setSessionAnswers] = useState<SessionAnswer[]>([]);
   const [saving,         setSaving]         = useState(false);
+
+  const { speak } = useTTS();
 
   useEffect(() => {
     try {
@@ -361,6 +364,14 @@ export default function SummerMode({ onBack }: { onBack: () => void }) {
             <p style={{ fontSize: currentQ.pattern === 1 ? 32 : 20, fontWeight: 800, lineHeight: 1.4 }}>
               {promptText}
             </p>
+            {currentQ.pattern === 1 && (
+              <button onClick={() => speak(currentQ.word.english)}
+                style={{ marginTop: 12, background: "rgba(255,255,255,0.25)", border: "none",
+                         borderRadius: 999, padding: "8px 18px", color: "#fff", fontWeight: 600,
+                         fontSize: 13, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                🔊 発音を聞く
+              </button>
+            )}
           </div>
 
           {!submitted ? (
