@@ -4,6 +4,7 @@ import ModeSelect      from "./ModeSelect";
 import EikaiwaMode     from "./EikaiwaMode";
 import TOEICMode       from "./TOEICMode";
 import EikenMode       from "./EikenMode";
+import SummerMode      from "./SummerMode";
 import DictionaryMode  from "./DictionaryMode";
 import RankingMode     from "./RankingMode";
 import type { Word, Phrase } from "../data/vocabulary";
@@ -11,7 +12,7 @@ import { useReviewList }   from "../hooks/useReviewList";
 import { useStudyHistory } from "../hooks/useStudyHistory";
 import { useWrongWords }   from "../hooks/useWrongWords";
 
-type AppMode = "select" | "eikaiwa" | "toeic" | "eiken" | "dictionary" | "ranking";
+type AppMode = "select" | "eikaiwa" | "toeic" | "eiken" | "summer" | "dictionary" | "ranking";
 
 interface Props {
   vocabulary:  Word[];
@@ -58,6 +59,10 @@ export default function AppClient({ vocabulary, phrases }: Props) {
         onBack={() => setMode("select")}
       />
     );
+  }
+
+  if (mode === "summer") {
+    return <SummerMode onBack={() => setMode("select")} />;
   }
 
   if (mode === "eikaiwa") {

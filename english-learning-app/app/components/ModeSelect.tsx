@@ -1,6 +1,6 @@
 "use client";
 
-type AppMode = "eikaiwa" | "toeic" | "eiken" | "dictionary" | "ranking";
+type AppMode = "eikaiwa" | "toeic" | "eiken" | "summer" | "dictionary" | "ranking";
 
 interface Props {
   onSelect: (mode: AppMode) => void;
@@ -101,6 +101,33 @@ export default function ModeSelect({ onSelect }: Props) {
             {["📝 模擬試験", "🔀 10パターン出題", "📊 スコア履歴"].map((t) => (
               <span key={t} style={{
                 background: "rgba(255,255,255,0.15)", borderRadius: 99,
+                padding: "3px 9px", fontSize: 10, fontWeight: 600,
+              }}>{t}</span>
+            ))}
+          </div>
+        </button>
+
+        {/* 夏休み課題対策モード */}
+        <button onClick={() => onSelect("summer")}
+          style={{
+            background: "linear-gradient(135deg,#ea580c,#facc15)",
+            border: "none", borderRadius: 20, padding: "24px 20px",
+            cursor: "pointer", textAlign: "left", color: "#431407",
+            boxShadow: "0 8px 32px rgba(234,88,12,0.4)",
+          }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <span style={{ fontSize: 38 }}>☀️</span>
+            <div>
+              <p style={{ fontSize: 19, fontWeight: 700, marginBottom: 3 }}>夏休み課題対策モード</p>
+              <p style={{ fontSize: 12, lineHeight: 1.5 }}>
+                ターゲット400語から入力式クイズ＋復習<br />モード内ランキングで進捗を競おう
+              </p>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 6, marginTop: 14, flexWrap: "wrap" }}>
+            {["⌨️ 入力式クイズ", "🔁 クイズ+復習セット", "🏆 モード内ランキング"].map((t) => (
+              <span key={t} style={{
+                background: "rgba(67,20,7,0.15)", borderRadius: 99,
                 padding: "3px 9px", fontSize: 10, fontWeight: 600,
               }}>{t}</span>
             ))}
