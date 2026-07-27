@@ -303,8 +303,11 @@ export default function SummerMode({ onBack }: { onBack: () => void }) {
           </button>
 
           <div style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 16, padding: 16 }}>
-            <p style={{ color: "#94a3b8", fontSize: 13, fontWeight: 600, marginBottom: 12 }}>
+            <p style={{ color: "#94a3b8", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
               🏆 夏休みモード ランキング
+            </p>
+            <p style={{ color: "#facc15", fontSize: 12, fontWeight: 700, marginBottom: 12 }}>
+              ランキング1位にはもちろん特典あり！
             </p>
             {ranking === null ? (
               <p style={{ color: "#475569", fontSize: 13, textAlign: "center", padding: "16px 0" }}>読み込み中...</p>
