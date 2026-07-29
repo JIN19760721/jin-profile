@@ -510,6 +510,8 @@ class TradeEngine:
         if not candidates:
             return
 
+        board_fail_count = 0
+
         for c in candidates:
             symbol = c.get("symbol", "")
             name   = c.get("symbol_name") or ""
@@ -519,11 +521,20 @@ class TradeEngine:
                 continue
 
             # /board からリアルタイムデータを取得（EXCHANGE_CODE=1: 東証）
-            board: dict = {}
+            # 失敗時は板価格ゼロ埋め等の誤った surge_score を保存すると
+            # 実際は急騰中でも NO_SURGE と誤判定されるため、今回のtickは
+            # スキップして次回に賭ける（既存の保存値を上書きしない）。
             try:
                 board = self._client.get(f"/board/{symbol}@1")
-            except Exception:
-                pass
+            except Exception as e:
+                board_fail_count += 1
+                log.warning("board取得失敗 %s: %s — 今回のsurge評価をスキップします", symbol, e)
+                continue
+
+            if not board:
+                board_fail_count += 1
+                log.warning("board取得: %s の応答が空です — 今回のsurge評価をスキップします", symbol)
+                continue
 
             today_volume   = float(board.get("TradingVolume") or 0)
             today_turnover = float(board.get("TradingValue") or board.get("Turnover") or 0)
@@ -616,6 +627,12 @@ class TradeEngine:
                     surge_reason=result.surge_reason,
                     dry_run=self.dry_run,
                 )
+
+        if board_fail_count:
+            log.warning(
+                "surge評価: %d/%d 銘柄で board 取得に失敗しました（kabuステーションの接続状況を確認してください）",
+                board_fail_count, len(candidates),
+            )
 
     def _on_shutdown(self) -> None:
         """終了時の後処理: 日次サマリー更新・LINE レポート送信。（重複呼び出し防止済み）"""
