@@ -21,6 +21,12 @@ trade:
   position_check_interval_seconds: 10  # 保有ポジションの損切り/利確監視の間隔（60秒だと損切りラインの超過が大きくなるため）
   pre_market_yfinance_time: "08:00" # yfinance 前日データによる事前スキャン時刻
   pre_market_scan_time: "08:57" # kabu station ランキングによる寄り付き前スキャン時刻
+  # Claude 寄り付き前フィルタ（気配値ベース、pre_market_yfinance と pre_market_scan の間で実行）
+  pre_market_llm_enabled: true          # false でこの機能を無効化（無効時・失敗時は候補をそのまま使用＝フェイルオープン）
+  pre_market_llm_time: "08:50"          # 実行時刻（気配は9:00に近いほど信頼性が上がるが、08:57のkabuスキャンより前に終える必要がある）
+  pre_market_llm_model: "claude-opus-4-8"
+  pre_market_llm_universe_size: 25      # Claudeに提示する候補数（score上位から）
+  pre_market_llm_top_n: 10              # Claudeに選ばせる件数
   force_close_time: "15:20"     # 強制全ポジション決済時刻
   min_score_to_enter: 60.0      # この score 以上の銘柄のみエントリー対象
   daily_loss_limit: -30000      # 日次損失上限（円）。超過したら新規発注停止

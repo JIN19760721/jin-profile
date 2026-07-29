@@ -91,6 +91,18 @@ def notify_scan_complete(candidates: list[dict], dry_run: bool = False) -> None:
         send(text[i:i + chunk_size], dry_run=dry_run, title="寄り付き前スキャン完了")
 
 
+def notify_llm_premarket_picks(selected: dict[str, str], dry_run: bool = False) -> None:
+    """Claude 寄り付き前フィルタの選定結果を通知する。"""
+    if not selected:
+        lines = ["該当銘柄なし"]
+    else:
+        lines = [f"{sym}: {reason}" for sym, reason in selected.items()]
+    text = "\n".join(lines)
+    chunk_size = 4000
+    for i in range(0, len(text), chunk_size):
+        send(text[i:i + chunk_size], dry_run=dry_run, title="Claude寄り付き前フィルタ")
+
+
 def notify_pre_entry_alert(
     symbol: str,
     name: str,

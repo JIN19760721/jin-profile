@@ -32,6 +32,7 @@ NTFY_TOPIC: str = os.getenv("NTFY_TOPIC", "")
 NTFY_URL: str = os.getenv("NTFY_URL", "https://ntfy.sh")
 TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
+ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
 
 DB_PATH: Path = Path(__file__).parent.parent / "data" / "trades.db"
 
@@ -76,6 +77,12 @@ POLLING_INTERVAL: int       = int(_T.get("polling_interval_seconds", 60))
 POSITION_CHECK_INTERVAL_SEC: int = int(_T.get("position_check_interval_seconds", 10))
 PRE_MARKET_YFINANCE_TIME: str = str(_T.get("pre_market_yfinance_time", "08:00"))
 PRE_MARKET_SCAN_TIME: str   = str(_T.get("pre_market_scan_time", "08:45"))
+# Claude 寄り付き前フィルタ（気配値ベース）
+PRE_MARKET_LLM_ENABLED: bool       = bool(_T.get("pre_market_llm_enabled", True))
+PRE_MARKET_LLM_TIME: str           = str(_T.get("pre_market_llm_time", "08:30"))
+PRE_MARKET_LLM_MODEL: str          = str(_T.get("pre_market_llm_model", "claude-opus-4-8"))
+PRE_MARKET_LLM_UNIVERSE_SIZE: int  = int(_T.get("pre_market_llm_universe_size", 25))
+PRE_MARKET_LLM_TOP_N: int          = int(_T.get("pre_market_llm_top_n", 10))
 FORCE_CLOSE_TIME: str       = str(_T.get("force_close_time", "15:20"))
 MIN_SCORE_TO_ENTER: float   = float(_T.get("min_score_to_enter", 60.0))
 DAILY_LOSS_LIMIT: float     = float(_T.get("daily_loss_limit", -30000))

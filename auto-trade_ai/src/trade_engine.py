@@ -2,7 +2,9 @@
 メイン取引ループ。
 
 タイムライン:
-  08:45  寄り付き前スキャン → daily_candidates に保存
+  08:00  yfinance 事前スキャン → daily_candidates に保存（kabu APIが使えない時間帯向け）
+  08:30  Claude 寄り付き前フィルタ（気配値ベース、失敗時は何もせずフェイルオープン）
+  08:57  kabu station ランキングによる寄り付き前スキャン → daily_candidates を更新
   09:00〜  POSITION_CHECK_INTERVAL_SEC(既定10秒)間隔: ポジション監視（損切り・利確・PENDING確認）
            POLLING_INTERVAL(既定60秒)間隔          : 新規エントリー探索（ランキング取得・surge評価）
   15:20  強制全クローズ → 終了
@@ -26,6 +28,8 @@ from src.config import (
     PATHC_MIN_SURGE,
     POLLING_INTERVAL,
     POSITION_CHECK_INTERVAL_SEC,
+    PRE_MARKET_LLM_ENABLED,
+    PRE_MARKET_LLM_TIME,
     PRE_MARKET_SCAN_TIME,
     PRE_MARKET_YFINANCE_TIME,
     SURGE_BYPASS_MIN_SCORE,
@@ -38,6 +42,7 @@ from src.config import (
     TRADING_SESSIONS,
     USE_SURGE_SCORE_FILTER,
 )
+from src import premarket_llm_filter
 from src.entry_policy import check as policy_check
 from src.kabu_client import KabuClient
 from src.order_manager import OrderManager
@@ -171,6 +176,14 @@ class TradeEngine:
             self._on_shutdown()
             return
 
+        # ── Claude 寄り付き前フィルタ（気配値ベース）──────────────────────
+        try:
+            self._run_llm_premarket_filter()
+        except KeyboardInterrupt:
+            log.info("Claudeフィルタ中に手動中断を検出しました。")
+            self._on_shutdown()
+            return
+
         # ── 寄り付き前スキャン ──────────────────────────────────────────
         try:
             self._ensure_pre_market_scan()
@@ -237,6 +250,33 @@ class TradeEngine:
                 log.warning("yfinance 事前スキャン: 候補なし")
         except Exception as e:
             log.error("yfinance 事前スキャン 失敗: %s", e)
+
+    def _run_llm_premarket_filter(self) -> None:
+        """Claude による寄り付き前フィルタ（気配値ベース）を実行する。
+
+        PRE_MARKET_LLM_TIME（既定 08:30）に1回だけ実行する。無効化されている場合、
+        kabu スキャン時刻を過ぎている場合、API呼び出しに失敗した場合はいずれも
+        何もせず終了する（フェイルオープン＝既存の候補リストがそのまま使われる）。
+        """
+        if not PRE_MARKET_LLM_ENABLED:
+            return
+
+        now_min  = _hhmm_to_minutes(*_now_hhmm())
+        llm_min  = _hhmm_to_minutes(*_parse_hhmm(PRE_MARKET_LLM_TIME))
+        kabu_min = _hhmm_to_minutes(*_parse_hhmm(PRE_MARKET_SCAN_TIME))
+
+        if now_min >= kabu_min:
+            log.info("kabu スキャン時刻以降のため Claude 寄り付き前フィルタをスキップします")
+            return
+
+        if now_min < llm_min:
+            _wait_until(PRE_MARKET_LLM_TIME)
+
+        log.info("=== Claude 寄り付き前フィルタ開始 ===")
+        try:
+            premarket_llm_filter.run(self._client)
+        except Exception as e:
+            log.error("Claude 寄り付き前フィルタ 失敗（フィルタなしで継続します）: %s", e)
 
     def _ensure_pre_market_scan(self) -> None:
         """スキャンが必要な場合に実行する（起動タイミング依存のフォールバック付き）。"""
@@ -337,6 +377,18 @@ class TradeEngine:
         if not raw_candidates:
             log.warning("候補銘柄リストが空です。")
             return
+
+        # ②-b Claude 寄り付き前フィルタが実行済みなら、明示的に非選定(0)の銘柄を除外する
+        # （未評価=NULLの銘柄は対象外にしない＝フィルタ後に新たに現れた候補を締め出さない。
+        #   フィルタが未実行・失敗の場合は全銘柄がNULLのままなので、この分岐自体が働かない
+        #   ＝フェイルオープン）
+        if any(c.get("llm_selected") is not None for c in raw_candidates):
+            before = len(raw_candidates)
+            raw_candidates = [c for c in raw_candidates if c.get("llm_selected") != 0]
+            log.info(
+                "Claude寄り付き前フィルタ適用: %d件 → %d件",
+                before, len(raw_candidates),
+            )
 
         # ③ surge 評価対象: 経路C有効時は score 不問で全件、それ以外は score>=40
         if USE_SURGE_SCORE_FILTER and PATHC_ENABLED:

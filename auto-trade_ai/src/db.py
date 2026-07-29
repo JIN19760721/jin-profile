@@ -90,6 +90,9 @@ def init_db(db_path: Path = DB_PATH) -> None:
             near_day_high_ratio  REAL,
             vwap_position        REAL,
             last_surge_checked_at TEXT,
+            -- Claude 寄り付き前フィルタ（ALTER TABLE で後付け可）
+            llm_selected         INTEGER,
+            llm_reason           TEXT,
             UNIQUE(date, symbol)
         );
         """)
@@ -121,11 +124,16 @@ _SURGE_COLUMNS = [
     ("last_surge_checked_at","TEXT"),
 ]
 
+_LLM_PREFILTER_COLUMNS = [
+    ("llm_selected", "INTEGER"),
+    ("llm_reason",   "TEXT"),
+]
+
 
 def _migrate_daily_candidates(conn: sqlite3.Connection) -> None:
-    """daily_candidates に surge_score 関連列が無ければ追加する。"""
+    """daily_candidates に surge_score / llm_selected 関連列が無ければ追加する。"""
     existing = {row[1] for row in conn.execute("PRAGMA table_info(daily_candidates)")}
-    for col, typ in _SURGE_COLUMNS:
+    for col, typ in _SURGE_COLUMNS + _LLM_PREFILTER_COLUMNS:
         if col not in existing:
             conn.execute(f"ALTER TABLE daily_candidates ADD COLUMN {col} {typ}")
 
@@ -546,3 +554,26 @@ def get_daily_candidates(db_path: Path = DB_PATH) -> list[dict]:
             (today,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def save_llm_prefilter(
+    evaluated_symbols: list[str],
+    selected: dict[str, str],
+    db_path: Path = DB_PATH,
+) -> None:
+    """Claude 寄り付き前フィルタの結果を保存する。
+
+    evaluated_symbols: Claude に提示した全銘柄（選定されなければ llm_selected=0 になる）
+    selected: {symbol: reason} 選定された銘柄と理由
+    未評価（このフィルタを一度も通っていない）銘柄は llm_selected=NULL のまま残る。
+    """
+    today = _today()
+    with _connect(db_path) as conn:
+        for sym in evaluated_symbols:
+            reason = selected.get(sym)
+            conn.execute(
+                """UPDATE daily_candidates
+                   SET llm_selected=?, llm_reason=?
+                   WHERE date=? AND symbol=?""",
+                (int(sym in selected), reason, today, sym),
+            )
