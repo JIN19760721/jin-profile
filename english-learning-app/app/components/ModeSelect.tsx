@@ -124,6 +124,9 @@ export default function ModeSelect({ onSelect }: Props) {
               </p>
             </div>
           </div>
+          <p style={{ fontSize: 11, lineHeight: 1.6, marginTop: 12, fontWeight: 600 }}>
+            知らない単語を覚える為にやるので、間違いが多いのは当たり前です。気にせずやりましょう。
+          </p>
           <div style={{ display: "flex", gap: 6, marginTop: 14, flexWrap: "wrap" }}>
             {["⌨️ 入力式クイズ", "🔁 クイズ+復習セット", "🏆 モード内ランキング"].map((t) => (
               <span key={t} style={{
