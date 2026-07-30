@@ -361,6 +361,7 @@ class TradeEngine:
 
     def _try_new_entries(self) -> None:
         """候補から条件を満たす銘柄に買い注文を出す。"""
+        _tick_start = time.monotonic()
         # ① リアルタイムスキャンを試みて DB にマージ
         try:
             rankings = fetch_all_rankings(self._client, TRADE_EXCHANGE)
@@ -532,8 +533,70 @@ class TradeEngine:
                     order_id, symbol, board_price, ORDER_QTY, entry_path,
                 )
 
+        log.info(
+            "新規エントリー探索 完了 (%.1f秒, 候補%d件 → surge評価対象%d件 → エントリー候補%d件)",
+            time.monotonic() - _tick_start,
+            len(raw_candidates), len(price_filtered), len(entry_candidates),
+        )
+
+    def _prefetch_hist_avgs(self, symbols: list[str]) -> None:
+        """複数銘柄の20日平均出来高・売買代金をまとめて取得し、キャッシュに格納する。
+
+        1銘柄ずつ yf.download すると銘柄数に比例してネットワーク往復が発生し、
+        取引所拡大で候補数が増えた際に tick 全体を長時間（実際には1日で
+        surge評価が3回程度しか回らない事態が）ブロックしていた。
+        premarket_screener.py と同じ「複数ティッカーをまとめて1回で取得」する
+        方式に揃えて解消する。取得・パースに失敗した銘柄は _get_hist_avgs の
+        個別フォールバックに委ねる。
+        """
+        targets = sorted({s for s in symbols if s and s not in self._hist_cache})
+        if not targets:
+            return
+
+        try:
+            import yfinance as yf
+            tickers = [f"{s}.T" for s in targets]
+            df = yf.download(
+                tickers,
+                period=f"{SURGE_HIST_DAYS + 5}d",
+                interval="1d",
+                progress=False,
+                auto_adjust=True,
+                group_by="ticker",
+            )
+        except Exception as e:
+            log.warning("20日平均の一括取得に失敗しました（個別取得にフォールバックします）: %s", e)
+            return
+
+        if df is None or df.empty:
+            return
+
+        for symbol in targets:
+            ticker = f"{symbol}.T"
+            try:
+                if len(targets) == 1:
+                    sub = df
+                else:
+                    if ticker not in df.columns.get_level_values(0):
+                        continue
+                    sub = df[ticker]
+                sub = sub.dropna(subset=["Close", "Volume"])
+                if len(sub) < SURGE_HIST_DAYS:
+                    continue
+                recent = sub.iloc[-SURGE_HIST_DAYS:]
+                avg_vol = float(recent["Volume"].mean())
+                avg_to  = float((recent["Close"] * recent["Volume"]).mean())
+                self._hist_cache[symbol] = (avg_vol, avg_to)
+            except Exception:
+                continue
+
     def _get_hist_avgs(self, symbol: str) -> tuple[float, float]:
-        """yfinance から 20 日平均出来高・売買代金を返す（セッション内キャッシュ付き）。"""
+        """yfinance から 20 日平均出来高・売買代金を返す（セッション内キャッシュ付き）。
+
+        通常は _evaluate_surge_scores が呼ぶ _prefetch_hist_avgs で事前に
+        キャッシュ済みのはずで、ここは一括取得で解決できなかった銘柄の
+        個別フォールバック。
+        """
         if symbol in self._hist_cache:
             return self._hist_cache[symbol]
         try:
@@ -561,6 +624,13 @@ class TradeEngine:
         """候補銘柄の surge_score を評価して DB に保存し、LINE 通知する。"""
         if not candidates:
             return
+
+        _hist_start = time.monotonic()
+        self._prefetch_hist_avgs([c.get("symbol", "") for c in candidates if c.get("symbol")])
+        log.info(
+            "20日平均の一括取得 完了 (%.1f秒, %d銘柄)",
+            time.monotonic() - _hist_start, len(candidates),
+        )
 
         board_fail_count = 0
 
