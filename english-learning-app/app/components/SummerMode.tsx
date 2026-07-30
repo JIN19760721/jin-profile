@@ -50,6 +50,11 @@ function pickWeightedWords(perWord: SummerProgress["perWord"], n: number): Summe
   return scored.slice(0, n).map((s) => s.w);
 }
 
+function letterHint(word: string): string {
+  const letters = word.split("");
+  return letters.map((ch, i) => (i === 0 || i === letters.length - 1 ? ch : "_")).join(" ");
+}
+
 function shuffle<T>(arr: T[]): T[] {
   return [...arr].sort(() => Math.random() - 0.5);
 }
@@ -102,6 +107,7 @@ export default function SummerMode({ onBack }: { onBack: () => void }) {
   const [isCorrect,      setIsCorrect]      = useState(false);
   const [sessionAnswers, setSessionAnswers] = useState<SessionAnswer[]>([]);
   const [saving,         setSaving]         = useState(false);
+  const [showHint,       setShowHint]       = useState(false);
 
   const { speak } = useTTS();
 
@@ -154,6 +160,7 @@ export default function SummerMode({ onBack }: { onBack: () => void }) {
     setSessionAnswers([]);
     setAnswerInput("");
     setSubmitted(false);
+    setShowHint(false);
     setPhase("quiz");
   };
 
@@ -195,6 +202,7 @@ export default function SummerMode({ onBack }: { onBack: () => void }) {
       setCurrentIndex(next);
       setAnswerInput("");
       setSubmitted(false);
+    setShowHint(false);
       return;
     }
     if (currentRound === 1) {
@@ -202,6 +210,7 @@ export default function SummerMode({ onBack }: { onBack: () => void }) {
       setCurrentIndex(0);
       setAnswerInput("");
       setSubmitted(false);
+    setShowHint(false);
       return;
     }
     // 40問終了
@@ -378,22 +387,39 @@ export default function SummerMode({ onBack }: { onBack: () => void }) {
           </div>
 
           {!submitted ? (
-            <div style={{ display: "flex", gap: 8 }}>
-              <input
-                autoFocus
-                value={answerInput}
-                onChange={(e) => setAnswerInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && submitAnswer()}
-                placeholder={currentQ.pattern === 1 ? "例：達成する" : "例：achieve"}
-                style={{ flex: 1, padding: "12px 14px", borderRadius: 12, background: "#1e293b",
-                         border: "1px solid #334155", color: "#e2e8f0", fontSize: 17, outline: "none" }}
-              />
-              <button onClick={submitAnswer} disabled={!answerInput.trim()}
-                style={{ background: answerInput.trim() ? "#ea580c" : "#1e293b", border: "none",
-                         borderRadius: 12, padding: "12px 22px", color: "#fff", fontWeight: 700,
-                         fontSize: 15, cursor: answerInput.trim() ? "pointer" : "default" }}>
-                回答
-              </button>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  autoFocus
+                  value={answerInput}
+                  onChange={(e) => setAnswerInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && submitAnswer()}
+                  placeholder={currentQ.pattern === 1 ? "例：達成する" : "例：achieve"}
+                  style={{ flex: 1, padding: "12px 14px", borderRadius: 12, background: "#1e293b",
+                           border: "1px solid #334155", color: "#e2e8f0", fontSize: 17, outline: "none" }}
+                />
+                <button onClick={submitAnswer} disabled={!answerInput.trim()}
+                  style={{ background: answerInput.trim() ? "#ea580c" : "#1e293b", border: "none",
+                           borderRadius: 12, padding: "12px 22px", color: "#fff", fontWeight: 700,
+                           fontSize: 15, cursor: answerInput.trim() ? "pointer" : "default" }}>
+                  回答
+                </button>
+              </div>
+              {currentQ.pattern === 2 && (
+                showHint ? (
+                  <p style={{ color: "#facc15", fontSize: 15, fontWeight: 700, letterSpacing: 2,
+                             textAlign: "center", fontFamily: "ui-monospace,Consolas,monospace" }}>
+                    💡 {letterHint(currentQ.word.english)}（{currentQ.word.english.length}文字）
+                  </p>
+                ) : (
+                  <button onClick={() => setShowHint(true)}
+                    style={{ alignSelf: "center", background: "none", border: "1px solid #334155",
+                             borderRadius: 999, padding: "5px 16px", color: "#94a3b8",
+                             fontSize: 12, cursor: "pointer" }}>
+                    💡 ヒントを見る（頭文字・文字数）
+                  </button>
+                )
+              )}
             </div>
           ) : (
             <div style={{ background: isCorrect ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.1)",
