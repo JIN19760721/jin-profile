@@ -19,6 +19,8 @@ kabuステーション デイトレ候補銘柄抽出ツール / 自動売買エ
 import argparse
 import logging
 import sys
+from datetime import date
+from pathlib import Path
 
 sys.stdout.reconfigure(encoding="utf-8")
 sys.stderr.reconfigure(encoding="utf-8")
@@ -29,9 +31,23 @@ from src.kabu_client import KabuClient
 from src.ranking_fetcher import fetch_all_rankings
 from src.screener import merge_and_score
 
+# .bat 側の `>> logfile 2>&1` リダイレクトだけに頼ると、標準出力がファイルに
+# リダイレクトされた際に Python がフルバッファリングに切り替わり、プロセスが
+# 異常終了した場合などにログがまったく書き出されないことがある
+# （実際、長時間動作した日のログがほぼ空のままだった）。
+# logging.FileHandler は1行ごとに flush されるため、ここで直接ファイルへも
+# 書き出すことで .bat 側の挙動に関係なくログを残す。
+_LOG_DIR = Path(__file__).parent.parent / "logs"
+_LOG_DIR.mkdir(exist_ok=True)
+_LOG_FILE = _LOG_DIR / f"trade_{date.today().strftime('%Y%m%d')}.log"
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(_LOG_FILE, encoding="utf-8"),
+    ],
 )
 log = logging.getLogger("main")
 
