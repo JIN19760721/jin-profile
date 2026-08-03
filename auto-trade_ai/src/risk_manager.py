@@ -19,6 +19,7 @@ from src.config import (
     CAPITAL,
     DAILY_LOSS_LIMIT,
     MAX_POSITIONS,
+    MIN_STOCK_PRICE,
     ORDER_QTY,
     REENTRY_COOLDOWN_MIN,
 )
@@ -44,6 +45,13 @@ class RiskManager:
 
     def can_enter(self, symbol: str, current_price: float) -> tuple[bool, str]:
         """エントリー可否を判定する。(ok, reason) を返す。"""
+        # ①-0 最低株価チェック（呼値1円が%ベースの損切り/利確ラインに対して粗すぎる銘柄を除外）
+        if current_price < MIN_STOCK_PRICE:
+            return False, (
+                f"株価 {current_price:.0f}円 が下限 {MIN_STOCK_PRICE:.0f}円 未満"
+                f"（呼値の粒度が損切りラインに対して粗すぎる）"
+            )
+
         # ① 利用可能資金チェック（動的: 保有コストと実現損益を反映）
         avail = self.available_capital()
         order_cost = current_price * ORDER_QTY
@@ -97,13 +105,19 @@ class RiskManager:
         result = []
         for c in candidates:
             price = c.get("CurrentPrice") or c.get("current_price") or 0
+            symbol = c.get("Symbol") or c.get("symbol", "")
+            if price < MIN_STOCK_PRICE:
+                log.debug(
+                    "呼値の粒度が粗いため除外: %s %.0f円 < 下限%.0f円",
+                    symbol, price, MIN_STOCK_PRICE,
+                )
+                continue
             order_cost = price * ORDER_QTY
             if order_cost <= avail:
                 result.append(c)
             else:
                 log.debug(
                     "資金不足で除外: %s %.0f円×%d株=%.0f円 > 利用可能 %.0f円",
-                    c.get("Symbol") or c.get("symbol", ""), price, ORDER_QTY,
-                    order_cost, avail,
+                    symbol, price, ORDER_QTY, order_cost, avail,
                 )
         return result

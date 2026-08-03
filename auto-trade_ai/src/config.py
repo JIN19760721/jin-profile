@@ -62,6 +62,8 @@ _S = _SETTINGS.get("surge", {})
 CAPITAL: float              = float(_T.get("capital", 100000))
 ORDER_QTY: int              = int(_T.get("order_qty", 100))
 MAX_POSITIONS: int          = int(_T.get("max_positions", 5))
+# 呼値（最小値幅）が%ベースの損切り/利確ラインに対して粗くなりすぎる超低位株を除外する
+MIN_STOCK_PRICE: float      = float(_T.get("min_stock_price", 100))
 STOP_LOSS_PCT: float             = float(_T.get("stop_loss_pct", -3.0))
 TAKE_PROFIT_PCT: float           = float(_T.get("take_profit_pct", 8.0))
 TAKE_PROFIT_RCI_THRESHOLD: float = float(_T.get("take_profit_rci_threshold", 80.0))
