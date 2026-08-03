@@ -90,6 +90,10 @@ MIN_SCORE_TO_ENTER: float   = float(_T.get("min_score_to_enter", 60.0))
 DAILY_LOSS_LIMIT: float     = float(_T.get("daily_loss_limit", -30000))
 # 同一銘柄を当日決済後、再エントリーまでの待機時間（分）。0で無効
 REENTRY_COOLDOWN_MIN: int   = int(_T.get("reentry_cooldown_minutes", 60))
+# 現物取引は差金決済（当日売却代金での同一銘柄同日再買付）が証券会社によって
+# 制限される場合がある。未確認の間は安全側に倒し、同一銘柄は1日1往復までとする。
+# auカブコム証券で同日複数回売買が可能と確認できたら true にする。
+ALLOW_SAME_DAY_REENTRY: bool = bool(_T.get("allow_same_day_reentry", False))
 CASH_MARGIN: int            = int(_T.get("cash_margin", 1))
 ACCOUNT_TYPE: int           = int(_T.get("account_type", 4))
 TRADING_SESSIONS: list      = _T.get("trading_sessions", [{"start": "09:00", "end": "09:30"}])

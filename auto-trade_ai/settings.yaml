@@ -33,6 +33,8 @@ trade:
   min_score_to_enter: 60.0      # この score 以上の銘柄のみエントリー対象
   daily_loss_limit: -30000      # 日次損失上限（円）。超過したら新規発注停止
   reentry_cooldown_minutes: 60  # 同一銘柄を当日決済後、再エントリーまでの待機時間（分）。0で無効
+  allow_same_day_reentry: false # 現物取引の差金決済制限が未確認のため、同一銘柄は1日1往復までに制限（安全側）
+                                 # auカブコム証券で同日複数回売買が可能と確認できたら true に変更する
   cash_margin: 1                # 1=現物, 2=信用
   account_type: 4               # 4=特定口座
   exchange: "T"                 # 取引所フィルタ（東証全体=プライム+スタンダード+グロース。低位株の発見機会を増やすためプライム限定から拡大）

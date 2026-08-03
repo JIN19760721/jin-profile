@@ -16,6 +16,7 @@ from datetime import datetime
 
 from src import db
 from src.config import (
+    ALLOW_SAME_DAY_REENTRY,
     CAPITAL,
     DAILY_LOSS_LIMIT,
     MAX_POSITIONS,
@@ -77,10 +78,19 @@ class RiskManager:
                 f"日次損失 {today_pnl:.0f}円 が上限 {DAILY_LOSS_LIMIT:.0f}円 を超過"
             )
 
-        # ⑤ 同一銘柄クールダウン（当日決済直後の即再エントリーを防ぐ）
-        if REENTRY_COOLDOWN_MIN > 0:
-            last_closed_at = db.get_last_closed_time_today(symbol, dry_run=self.dry_run)
-            if last_closed_at is not None:
+        # ⑤ 同一銘柄クールダウン／同日複数回売買の制限
+        # 現物取引は差金決済（当日売却代金での同一銘柄同日再買付）が証券会社の
+        # 設定次第で拒否される可能性があり、未確認のため既定では同日再エントリーを
+        # 一律禁止する（ALLOW_SAME_DAY_REENTRY=Trueで解除可能）。
+        last_closed_at = db.get_last_closed_time_today(symbol, dry_run=self.dry_run)
+        if last_closed_at is not None:
+            if not ALLOW_SAME_DAY_REENTRY:
+                return False, (
+                    f"{symbol} は当日 {last_closed_at} に決済済み "
+                    f"(同一銘柄の同日複数回売買は無効化されています。"
+                    f"証券会社で同日再売買が可能と確認できたら allow_same_day_reentry を有効にしてください)"
+                )
+            if REENTRY_COOLDOWN_MIN > 0:
                 elapsed_min = (
                     datetime.now() - datetime.strptime(last_closed_at, "%Y-%m-%d %H:%M:%S")
                 ).total_seconds() / 60
