@@ -14,6 +14,9 @@ kabuステーション デイトレ候補銘柄抽出ツール / 自動売買エ
 
   # リアルタイム株価予測モニター（発注なし）
   python -m src.main --monitor
+
+  # Claude寄り付き前フィルタのみ（kabu API不要・発注なし・手動発注向け）
+  python -m src.main --llm-filter
 """
 
 import argparse
@@ -179,6 +182,49 @@ def run_trade(args) -> None:
     engine.run()
 
 
+def run_llm_filter(args) -> None:
+    """Claude 寄り付き前フィルタのみを実行する手動モード（発注・監視ループなし）。
+
+    kabuステーションAPIが（発注権限だけでなく気配取得も含めて）全般的に
+    使えない状況を前提に、KabuClient には一切接続しない。前日までの
+    yfinanceスクリーニングスコアのみをもとに Claude が候補を絞り込み、
+    結果をコンソール出力・通知(ntfy/LINE)する。ユーザーはこれを見て
+    寄り付き後に自分で発注する。
+    """
+    from src import db, premarket_llm_filter
+    from src.premarket_screener import run_premarket_scan
+
+    log.info("=== Claude 寄り付き前フィルタ（手動モード） 開始 ===")
+
+    candidates = db.get_daily_candidates()
+    if not candidates:
+        log.info("当日の候補銘柄が未取得のため yfinance 事前スキャンを実行します")
+        candidates = run_premarket_scan()
+        if not candidates:
+            log.warning("候補銘柄が取得できませんでした。終了します。")
+            return
+        db.save_daily_candidates(candidates)
+        log.info("yfinance 事前スキャン完了: %d 件を保存", len(candidates))
+
+    log.info("候補銘柄: %d 件（DBより）", len(candidates))
+
+    picks = premarket_llm_filter.run(None)
+
+    if not picks:
+        print("\nClaudeによる選定結果: 該当なし（またはAPI呼び出し失敗。ログを確認してください）\n")
+        log.info("=== 処理完了（選定なし） ===")
+        return
+
+    width = 70
+    print(f"\n{'=' * width}")
+    print(f"  Claude 寄り付き前フィルタ選定結果 ({len(picks)}件)  ※発注は各自手動で行ってください")
+    print(f"{'=' * width}")
+    for sym, reason in picks.items():
+        print(f"  {sym}: {reason}")
+    print(f"{'=' * width}\n")
+    log.info("=== 処理完了 ===")
+
+
 def run_monitor(args) -> None:
     from src import realtime_monitor
 
@@ -207,6 +253,11 @@ def main() -> None:
     parser.add_argument("--top", type=int, default=30)
     parser.add_argument("--trade",   action="store_true", help="自動売買モードで起動")
     parser.add_argument("--monitor", action="store_true", help="リアルタイムモニターで起動（発注なし）")
+    parser.add_argument(
+        "--llm-filter", action="store_true",
+        help="Claude寄り付き前フィルタのみを実行する手動モード（kabu API不要・発注なし。"
+             "yfinanceスコアのみで絞り込み、結果を見て自分で発注する）",
+    )
     parser.add_argument("--dry-run", action="store_true", help="検証モード（発注なし）")
     args = parser.parse_args()
 
@@ -214,6 +265,8 @@ def main() -> None:
         run_trade(args)
     elif args.monitor:
         run_monitor(args)
+    elif args.llm_filter:
+        run_llm_filter(args)
     else:
         run_screener(args)
 

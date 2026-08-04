@@ -1,10 +1,17 @@
 """
-Claude 寄り付き前フィルタ（気配値ベース）。
+Claude 寄り付き前フィルタ。
 
-08:30頃、kabuランキングAPIがまだ使えない時間帯に、既存の候補銘柄
-（daily_candidates、08:00のyfinance事前スキャン等で作成済み）に対して
-/board の気配値（最良気配・板全体の買い/売り数量）を取得し、Claudeに
-「本日注目すべき銘柄」を絞り込ませる。
+通常モード（client を渡した場合）:
+  08:30頃、kabuランキングAPIがまだ使えない時間帯に、既存の候補銘柄
+  （daily_candidates、08:00のyfinance事前スキャン等で作成済み）に対して
+  /board の気配値（最良気配・板全体の買い/売り数量）を取得し、Claudeに
+  「本日注目すべき銘柄」を絞り込ませる。
+
+手動モード（client=None）:
+  kabuステーションAPIが（発注権限だけでなく気配取得も含めて）一切使えない
+  状況向け。/board を一切呼ばず、前日までのyfinanceスクリーニングスコア
+  （score/reasons）のみをもとにClaudeに絞り込ませる。main.py の
+  --llm-filter から手動実行され、結果を見てユーザーが自分で発注する。
 
 発注可否・株数・損切りラインなどのハードなリスク判断は一切行わない。
 ここでの役割はあくまで「一次選定」であり、失敗時は何もせず
@@ -41,7 +48,7 @@ class _Picks(BaseModel):
     picks: list[_Pick]
 
 
-_SYSTEM_PROMPT = """あなたは日本株のデイトレード候補選定を補助するアシスタントです。
+_SYSTEM_PROMPT_BOARD = """あなたは日本株のデイトレード候補選定を補助するアシスタントです。
 このシステムは「買いエントリーのみ」を行います（空売りは行いません）。
 寄り付き前（8:30頃）の kabu ステーション気配値データをもとに、本日「買い」で
 狙う価値がある銘柄を絞り込んでください。下落が予想される銘柄は、値動きとして
@@ -66,6 +73,32 @@ _SYSTEM_PROMPT = """あなたは日本株のデイトレード候補選定を補
 - 買い優勢（imbalanceが正、buy_dominanceが高い）かつ数量も伴っている銘柄を優先すること
 - 選定する銘柄が top_n に満たない場合、無理に埋めずに該当なしのままでよい
 - 実際の発注可否・株数・損切りラインなどは別のロジックが判断するため、ここでは
+  「買いで狙う価値がある銘柄の絞り込みと理由」のみを行うこと（1銘柄につき理由は1行程度で簡潔に）
+"""
+
+_SYSTEM_PROMPT_NO_BOARD = """あなたは日本株のデイトレード候補選定を補助するアシスタントです。
+このシステムは「買いエントリーのみ」を行います（空売りは行いません）。
+
+重要な制約: kabuステーションAPIが（発注権限だけでなく気配値取得も含めて）
+一切利用できない状況のため、寄り付き前のリアルタイム気配値・板情報は全く
+渡されません。渡されるのは前日終値時点までのデータのみです。ユーザーは
+この選定結果を参考情報として、寄り付き後の実際の株価・気配を自分の目で
+確認したうえで手動で発注します（自動発注は行いません）。
+
+各銘柄について渡されるデータ:
+- score: 前日までの値上がり率・出来高急増・売買代金急増ランキングに基づく
+  総合スクリーニングスコア
+- reasons: スコアの根拠（各ランキングでの順位。複数のランキングにランクイン
+  しているほど根拠が強い）
+- current_price: 前日終値（円）
+
+選定方針:
+- 複数のランキングに同時にランクインしている銘柄（reasonsに理由が複数ある銘柄）を優先すること
+- 値上がり率のみでなく出来高・売買代金の急増を伴っている銘柄を優先すること
+- リアルタイムデータがない前提を踏まえ、寄り付き後の値動きが前日までの
+  トレンドと逆転するリスクがある点を理由に軽く触れてよい
+- 選定する銘柄が top_n に満たない場合、無理に埋めずに該当なしのままでよい
+- 実際の発注可否・株数・損切りラインなどはユーザー自身が判断するため、ここでは
   「買いで狙う価値がある銘柄の絞り込みと理由」のみを行うこと（1銘柄につき理由は1行程度で簡潔に）
 """
 
@@ -128,7 +161,9 @@ def _fetch_indicative(client: KabuClient, symbol: str) -> dict | None:
     }
 
 
-def _call_claude(summaries: list[dict], top_n: int, model: str) -> list[dict] | None:
+def _call_claude(
+    summaries: list[dict], top_n: int, model: str, system_prompt: str = _SYSTEM_PROMPT_BOARD
+) -> list[dict] | None:
     """Claude に候補一覧を渡して上位 top_n 件を選ばせる。失敗時は None（フェイルオープン）。"""
     if not ANTHROPIC_API_KEY:
         log.warning("ANTHROPIC_API_KEY が未設定のため Claude 寄り付き前フィルタをスキップします")
@@ -152,7 +187,7 @@ def _call_claude(summaries: list[dict], top_n: int, model: str) -> list[dict] | 
             model=model,
             max_tokens=4096,
             thinking={"type": "adaptive"},
-            system=_SYSTEM_PROMPT,
+            system=system_prompt,
             messages=[{"role": "user", "content": user_content}],
             output_format=_Picks,
         )
@@ -168,41 +203,67 @@ def _call_claude(summaries: list[dict], top_n: int, model: str) -> list[dict] | 
     return [{"symbol": p.symbol, "reason": p.reason} for p in picks]
 
 
-def run(client: KabuClient) -> None:
-    """寄り付き前フィルタを実行し、結果を daily_candidates に保存・通知する。"""
+def run(client: KabuClient | None) -> dict[str, str]:
+    """寄り付き前フィルタを実行し、結果を daily_candidates に保存・通知する。
+
+    client が None の場合は /board を一切呼ばず、daily_candidates の
+    score/reasons のみをもとに選定する（kabu API が全般的に使えない
+    手動モード向け）。
+
+    戻り値: {symbol: reason} の選定結果（該当なし・失敗時は {}）。
+    """
     candidates = db.get_daily_candidates()
     if not candidates:
         log.warning("Claude寄り付き前フィルタ: 候補銘柄がありません。スキップします。")
-        return
+        return {}
 
     pool = candidates[:PRE_MARKET_LLM_UNIVERSE_SIZE]
 
     summaries: list[dict] = []
     evaluated_symbols: list[str] = []
-    for c in pool:
-        symbol = c.get("symbol")
-        if not symbol:
-            continue
-        indicative = _fetch_indicative(client, symbol)
-        if indicative is None:
-            continue
-        evaluated_symbols.append(symbol)
-        summaries.append({
-            "symbol":      symbol,
-            "symbol_name": c.get("symbol_name") or "",
-            "score":       c.get("score"),
-            "reasons":     c.get("reasons"),
-            **indicative,
-        })
+
+    if client is not None:
+        for c in pool:
+            symbol = c.get("symbol")
+            if not symbol:
+                continue
+            indicative = _fetch_indicative(client, symbol)
+            if indicative is None:
+                continue
+            evaluated_symbols.append(symbol)
+            summaries.append({
+                "symbol":      symbol,
+                "symbol_name": c.get("symbol_name") or "",
+                "score":       c.get("score"),
+                "reasons":     c.get("reasons"),
+                **indicative,
+            })
+        system_prompt = _SYSTEM_PROMPT_BOARD
+        empty_warning = "気配値を取得できた銘柄がありませんでした。"
+    else:
+        for c in pool:
+            symbol = c.get("symbol")
+            if not symbol:
+                continue
+            evaluated_symbols.append(symbol)
+            summaries.append({
+                "symbol":        symbol,
+                "symbol_name":   c.get("symbol_name") or "",
+                "score":         c.get("score"),
+                "reasons":       c.get("reasons"),
+                "current_price": c.get("current_price"),
+            })
+        system_prompt = _SYSTEM_PROMPT_NO_BOARD
+        empty_warning = "候補銘柄のスコアデータがありませんでした。"
 
     if not summaries:
-        log.warning("Claude寄り付き前フィルタ: 気配値を取得できた銘柄がありませんでした。スキップします。")
-        return
+        log.warning("Claude寄り付き前フィルタ: %s スキップします。", empty_warning)
+        return {}
 
-    picks = _call_claude(summaries, PRE_MARKET_LLM_TOP_N, PRE_MARKET_LLM_MODEL)
+    picks = _call_claude(summaries, PRE_MARKET_LLM_TOP_N, PRE_MARKET_LLM_MODEL, system_prompt)
     if picks is None:
         log.warning("Claude寄り付き前フィルタ: Claude呼び出しに失敗したため、フィルタなしで継続します。")
-        return
+        return {}
 
     selected = {p["symbol"]: p["reason"] for p in picks}
     db.save_llm_prefilter(evaluated_symbols, selected)
@@ -218,3 +279,5 @@ def run(client: KabuClient) -> None:
         notifier.notify_llm_premarket_picks(selected)
     except Exception as e:
         log.warning("Claude選定結果の通知に失敗: %s", e)
+
+    return selected
