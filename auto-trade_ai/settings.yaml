@@ -29,6 +29,10 @@ trade:
   pre_market_llm_model: "claude-opus-4-8"
   pre_market_llm_universe_size: 25      # Claudeに提示する候補数（score上位から）
   pre_market_llm_top_n: 10              # Claudeに選ばせる件数
+  # TDnet適時開示の加味（非公式スクレイピング。失敗時はフェイルオープンで開示情報なし継続）
+  pre_market_llm_disclosure_enabled: true      # false でこの機能のみ無効化
+  pre_market_llm_disclosure_after_hour: 15     # 前営業日のこの時刻以降の開示を「引け後」として加味
+  pre_market_llm_disclosure_max_extras: 15     # モメンタム候補外から開示のみで補完する銘柄数の上限
   force_close_time: "15:20"     # 強制全ポジション決済時刻
   min_score_to_enter: 60.0      # この score 以上の銘柄のみエントリー対象
   daily_loss_limit: -30000      # 日次損失上限（円）。超過したら新規発注停止

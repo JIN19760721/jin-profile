@@ -13,6 +13,15 @@ Claude 寄り付き前フィルタ。
   （score/reasons）のみをもとにClaudeに絞り込ませる。main.py の
   --llm-filter から手動実行され、結果を見てユーザーが自分で発注する。
 
+両モード共通（適時開示の加味）:
+  TDnet（適時開示情報閲覧サービス）の当日分＋前営業日引け後分の開示一覧を
+  取得し、候補銘柄に該当する開示タイトルをClaudeへの入力に付加する。また、
+  モメンタムベースの候補プールに入っていなくても株価インパクトが大きそうな
+  開示（決算短信・業績予想の修正等）があった銘柄は、追加候補としてClaudeの
+  評価対象に補完する（自動発注パイプラインには追加しない。あくまでClaudeの
+  判断材料・通知への追加情報）。TDnet取得は非公式スクレイピングのため、
+  失敗しても開示情報なしで処理を継続する（フェイルオープン）。
+
 発注可否・株数・損切りラインなどのハードなリスク判断は一切行わない。
 ここでの役割はあくまで「一次選定」であり、失敗時は何もせず
 （フェイルオープン）既存の候補リストがそのまま使われる。
@@ -25,9 +34,12 @@ import logging
 
 from pydantic import BaseModel
 
-from src import db, notifier
+from src import db, notifier, tdnet_fetcher
 from src.config import (
     ANTHROPIC_API_KEY,
+    PRE_MARKET_LLM_DISCLOSURE_AFTER_HOUR,
+    PRE_MARKET_LLM_DISCLOSURE_ENABLED,
+    PRE_MARKET_LLM_DISCLOSURE_MAX_EXTRAS,
     PRE_MARKET_LLM_MODEL,
     PRE_MARKET_LLM_TOP_N,
     PRE_MARKET_LLM_UNIVERSE_SIZE,
@@ -65,12 +77,22 @@ _SYSTEM_PROMPT_BOARD = """あなたは日本株のデイトレード候補選定
 - under_buy_qty: 買い超過数量（板全体で約定できずに余っている買い注文の量）
 - over_sell_qty: 売り超過数量（同、売り注文側）
 - market_order_buy_qty / market_order_sell_qty: 成行注文数量（大きいほど確度の高い売買意欲）
+- disclosures: TDnet（適時開示情報閲覧サービス）で取得した、当日または前営業日引け後の
+  適時開示タイトル一覧（例: "17:00 2027年３月期 第１四半期決算短信〔日本基準〕（連結）"）。
+  存在しない銘柄にはこのフィールド自体がない
+- score が null の銘柄は、モメンタムランキングには入っていないが上記の適時開示のみを
+  理由に追加された銘柄（reasonsに「TDnet開示のみ」と記載）。気配値データはあるので
+  同様に評価してよい
 
 選定方針:
 - expected_change_pct が負（下落予想）の銘柄は、値動きとして注目に値しても選ばないこと
 - under_buy_qty/over_sell_qty が極端に薄いのに expected_change_pct だけ大きい銘柄は
   「見せ気配」の可能性を疑い、慎重に評価すること
 - 買い優勢（imbalanceが正、buy_dominanceが高い）かつ数量も伴っている銘柄を優先すること
+- disclosures がある銘柄は内容を読み、上方修正・増配・自己株式取得・好material提携等の
+  好材料であれば加点、下方修正・特別損失・公募増資等の悪材料であれば減点（選定除外）
+  すること。decision短信そのものは中立（数値を伴わないタイトルのみでは方向感なし）と
+  扱い、他のタイトル（業績予想の修正等）が併記されている場合はそちらを優先判断すること
 - 選定する銘柄が top_n に満たない場合、無理に埋めずに該当なしのままでよい
 - 実際の発注可否・株数・損切りラインなどは別のロジックが判断するため、ここでは
   「買いで狙う価値がある銘柄の絞り込みと理由」のみを行うこと（1銘柄につき理由は1行程度で簡潔に）
@@ -90,11 +112,22 @@ _SYSTEM_PROMPT_NO_BOARD = """あなたは日本株のデイトレード候補選
   総合スクリーニングスコア
 - reasons: スコアの根拠（各ランキングでの順位。複数のランキングにランクイン
   しているほど根拠が強い）
-- current_price: 前日終値（円）
+- current_price: 前日終値（円）。null の場合は価格情報自体が取得できていない
+  （後述のTDnet開示のみで追加された銘柄はこれに該当することが多い）
+- disclosures: TDnet（適時開示情報閲覧サービス）で取得した、当日または前営業日引け後の
+  適時開示タイトル一覧（例: "17:00 2027年３月期 第１四半期決算短信〔日本基準〕（連結）"）。
+  存在しない銘柄にはこのフィールド自体がない
+- score が null の銘柄は、モメンタムランキングには入っていないが上記の適時開示のみを
+  理由に追加された銘柄（reasonsに「TDnet開示のみ」と記載）
 
 選定方針:
 - 複数のランキングに同時にランクインしている銘柄（reasonsに理由が複数ある銘柄）を優先すること
 - 値上がり率のみでなく出来高・売買代金の急増を伴っている銘柄を優先すること
+- disclosures がある銘柄は内容を読み、上方修正・増配・自己株式取得・好material提携等の
+  好材料であれば加点、下方修正・特別損失・公募増資等の悪材料であれば減点（選定除外）
+  すること。決算短信そのものは中立（数値を伴わないタイトルのみでは方向感なし）と扱うこと
+- current_price が null の銘柄（TDnet開示のみで追加）は価格未確認である旨を理由に含め、
+  ユーザーが寄り付き前に必ず自分で株価を確認する前提で選定してよい
 - リアルタイムデータがない前提を踏まえ、寄り付き後の値動きが前日までの
   トレンドと逆転するリスクがある点を理由に軽く触れてよい
 - 選定する銘柄が top_n に満たない場合、無理に埋めずに該当なしのままでよい
@@ -203,6 +236,47 @@ def _call_claude(
     return [{"symbol": p.symbol, "reason": p.reason} for p in picks]
 
 
+def _build_summary(
+    client: KabuClient | None,
+    symbol: str,
+    symbol_name: str | None,
+    score: float | None,
+    reasons: str | None,
+    current_price: float | None = None,
+) -> dict | None:
+    """1銘柄分のClaude入力用サマリーを作る。board取得に失敗した場合は None。"""
+    if client is not None:
+        indicative = _fetch_indicative(client, symbol)
+        if indicative is None:
+            return None
+        return {
+            "symbol":      symbol,
+            "symbol_name": symbol_name or "",
+            "score":       score,
+            "reasons":     reasons,
+            **indicative,
+        }
+    return {
+        "symbol":        symbol,
+        "symbol_name":   symbol_name or "",
+        "score":         score,
+        "reasons":       reasons,
+        "current_price": current_price,
+    }
+
+
+def _fetch_disclosures() -> dict[str, list[dict]]:
+    if not PRE_MARKET_LLM_DISCLOSURE_ENABLED:
+        return {}
+    try:
+        return tdnet_fetcher.fetch_recent_disclosures(
+            after_hour=PRE_MARKET_LLM_DISCLOSURE_AFTER_HOUR
+        )
+    except Exception as e:
+        log.warning("TDnet開示取得に失敗しました（開示情報なしで継続）: %s", e)
+        return {}
+
+
 def run(client: KabuClient | None) -> dict[str, str]:
     """寄り付き前フィルタを実行し、結果を daily_candidates に保存・通知する。
 
@@ -218,43 +292,55 @@ def run(client: KabuClient | None) -> dict[str, str]:
         return {}
 
     pool = candidates[:PRE_MARKET_LLM_UNIVERSE_SIZE]
+    system_prompt = _SYSTEM_PROMPT_BOARD if client is not None else _SYSTEM_PROMPT_NO_BOARD
+    empty_warning = (
+        "気配値を取得できた銘柄がありませんでした。" if client is not None
+        else "候補銘柄のスコアデータがありませんでした。"
+    )
+
+    disclosures_by_symbol = _fetch_disclosures()
 
     summaries: list[dict] = []
     evaluated_symbols: list[str] = []
+    pool_symbols: set[str] = set()
 
-    if client is not None:
-        for c in pool:
-            symbol = c.get("symbol")
-            if not symbol:
+    for c in pool:
+        symbol = c.get("symbol")
+        if not symbol:
+            continue
+        pool_symbols.add(symbol)
+        summary = _build_summary(
+            client, symbol, c.get("symbol_name"), c.get("score"), c.get("reasons"),
+            c.get("current_price"),
+        )
+        if summary is None:
+            continue
+        evaluated_symbols.append(symbol)
+        summaries.append(summary)
+
+    # モメンタム候補プールに入っていないが、株価インパクトが大きそうな適時開示が
+    # あった銘柄を追加候補として補完する（自動発注パイプラインには入れない。
+    # あくまでClaudeの評価対象・通知への追加情報として扱う）。
+    extra_added = 0
+    if disclosures_by_symbol:
+        for symbol in disclosures_by_symbol:
+            if symbol in pool_symbols:
                 continue
-            indicative = _fetch_indicative(client, symbol)
-            if indicative is None:
+            if extra_added >= PRE_MARKET_LLM_DISCLOSURE_MAX_EXTRAS:
+                break
+            summary = _build_summary(client, symbol, "", None, "TDnet開示のみ（モメンタム候補外）")
+            if summary is None:
                 continue
             evaluated_symbols.append(symbol)
-            summaries.append({
-                "symbol":      symbol,
-                "symbol_name": c.get("symbol_name") or "",
-                "score":       c.get("score"),
-                "reasons":     c.get("reasons"),
-                **indicative,
-            })
-        system_prompt = _SYSTEM_PROMPT_BOARD
-        empty_warning = "気配値を取得できた銘柄がありませんでした。"
-    else:
-        for c in pool:
-            symbol = c.get("symbol")
-            if not symbol:
-                continue
-            evaluated_symbols.append(symbol)
-            summaries.append({
-                "symbol":        symbol,
-                "symbol_name":   c.get("symbol_name") or "",
-                "score":         c.get("score"),
-                "reasons":       c.get("reasons"),
-                "current_price": c.get("current_price"),
-            })
-        system_prompt = _SYSTEM_PROMPT_NO_BOARD
-        empty_warning = "候補銘柄のスコアデータがありませんでした。"
+            summaries.append(summary)
+            extra_added += 1
+        if extra_added:
+            log.info("TDnet開示により %d 銘柄を追加候補として補完しました", extra_added)
+
+    for s in summaries:
+        items = disclosures_by_symbol.get(s["symbol"])
+        if items:
+            s["disclosures"] = [f'{it["time"]} {it["title"]}' for it in items[:3]]
 
     if not summaries:
         log.warning("Claude寄り付き前フィルタ: %s スキップします。", empty_warning)
