@@ -556,6 +556,29 @@ def get_daily_candidates(db_path: Path = DB_PATH) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_recent_candidate_history(
+    symbol: str,
+    before_date: str | None = None,
+    within_days: int = 7,
+    db_path: Path = DB_PATH,
+) -> list[dict]:
+    """指定銘柄の直近 within_days 日（before_date を含まない）分の
+    daily_candidates 履歴を新しい順で返す。連続候補入り・スコア推移の
+    判定に使う（Claude寄り付き前フィルタの追加材料）。
+
+    戻り値: [{"date": ..., "score": ..., "llm_selected": ...}, ...]（新しい順）
+    """
+    ref = before_date or _today()
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            """SELECT date, score, llm_selected FROM daily_candidates
+               WHERE symbol=? AND date<? AND date>=date(?, ?)
+               ORDER BY date DESC""",
+            (symbol, ref, ref, f"-{within_days} days"),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def save_llm_prefilter(
     evaluated_symbols: list[str],
     selected: dict[str, str],
