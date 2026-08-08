@@ -95,6 +95,15 @@ def init_db(db_path: Path = DB_PATH) -> None:
             llm_reason           TEXT,
             UNIQUE(date, symbol)
         );
+
+        CREATE TABLE IF NOT EXISTS watchlist (
+            symbol       TEXT PRIMARY KEY,
+            held         INTEGER NOT NULL DEFAULT 0,
+            entry_price  REAL,
+            qty          INTEGER,
+            memo         TEXT,
+            added_at     TEXT NOT NULL
+        );
         """)
         # 既存 DB への列追加マイグレーション
         _migrate_daily_candidates(conn)
@@ -576,6 +585,45 @@ def get_recent_candidate_history(
                ORDER BY date DESC""",
             (symbol, ref, ref, f"-{within_days} days"),
         ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ─── watchlist（--watch-add / --watch-remove / --watch-list / --advise） ──────
+
+def add_watchlist_symbol(
+    symbol: str,
+    held: bool = False,
+    entry_price: float | None = None,
+    qty: int | None = None,
+    memo: str | None = None,
+    db_path: Path = DB_PATH,
+) -> None:
+    """ウォッチリストに銘柄を登録する。既に登録済みの場合は上書き更新する。"""
+    with _connect(db_path) as conn:
+        conn.execute(
+            """INSERT INTO watchlist (symbol, held, entry_price, qty, memo, added_at)
+               VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(symbol) DO UPDATE SET
+                 held=excluded.held,
+                 entry_price=excluded.entry_price,
+                 qty=excluded.qty,
+                 memo=excluded.memo,
+                 added_at=excluded.added_at""",
+            (symbol, int(held), entry_price, qty, memo, _now()),
+        )
+
+
+def remove_watchlist_symbol(symbol: str, db_path: Path = DB_PATH) -> bool:
+    """ウォッチリストから銘柄を削除する。削除した場合True、対象が無ければFalse。"""
+    with _connect(db_path) as conn:
+        cur = conn.execute("DELETE FROM watchlist WHERE symbol=?", (symbol,))
+        return cur.rowcount > 0
+
+
+def get_watchlist(db_path: Path = DB_PATH) -> list[dict]:
+    """登録日時順（古い順）でウォッチリスト全件を返す。"""
+    with _connect(db_path) as conn:
+        rows = conn.execute("SELECT * FROM watchlist ORDER BY added_at").fetchall()
     return [dict(r) for r in rows]
 
 

@@ -17,6 +17,13 @@ kabuステーション デイトレ候補銘柄抽出ツール / 自動売買エ
 
   # Claude寄り付き前フィルタのみ（kabu API不要・発注なし・手動発注向け）
   python -m src.main --llm-filter
+
+  # ウォッチリスト管理・買い時売り時アドバイス（kabu API不要・発注なし）
+  python -m src.main --watch-add 7203 --memo "決算後の動き待ち"
+  python -m src.main --watch-add 9984 --held --entry-price 5800 --qty 100
+  python -m src.main --watch-list
+  python -m src.main --watch-remove 7203
+  python -m src.main --advise
 """
 
 import argparse
@@ -28,7 +35,7 @@ from pathlib import Path
 sys.stdout.reconfigure(encoding="utf-8")
 sys.stderr.reconfigure(encoding="utf-8")
 
-from src.config import EXCHANGE_DIVISION, TRADE_EXCHANGE
+from src.config import DB_PATH, EXCHANGE_DIVISION, TRADE_EXCHANGE
 from src.exporter import OUTPUT_PATH, export_csv
 from src.kabu_client import KabuClient
 from src.ranking_fetcher import fetch_all_rankings
@@ -225,6 +232,92 @@ def run_llm_filter(args) -> None:
     log.info("=== 処理完了 ===")
 
 
+def run_watch_add(args) -> None:
+    """ウォッチリストに銘柄を登録する（kabu API不要）。既存銘柄への再登録は上書き。"""
+    from src import db
+
+    db.init_db(DB_PATH)
+    if args.held and (args.entry_price is None or args.qty is None):
+        log.warning(
+            "--held 指定時は --entry-price / --qty も指定することを推奨します"
+            "（未指定のままだと含み損益を判断できません）"
+        )
+    db.add_watchlist_symbol(
+        args.watch_add, held=args.held, entry_price=args.entry_price,
+        qty=args.qty, memo=args.memo,
+    )
+    log.info(
+        "ウォッチリストに登録しました: %s (held=%s%s)",
+        args.watch_add, args.held,
+        f", entry_price={args.entry_price}, qty={args.qty}" if args.held else "",
+    )
+
+
+def run_watch_remove(args) -> None:
+    """ウォッチリストから銘柄を削除する。"""
+    from src import db
+
+    db.init_db(DB_PATH)
+    if db.remove_watchlist_symbol(args.watch_remove):
+        log.info("ウォッチリストから削除しました: %s", args.watch_remove)
+    else:
+        log.warning("ウォッチリストに存在しません: %s", args.watch_remove)
+
+
+def run_watch_list(args) -> None:
+    """ウォッチリスト登録済み銘柄を一覧表示する。"""
+    from src import db
+
+    db.init_db(DB_PATH)
+    watchlist = db.get_watchlist()
+    if not watchlist:
+        print("\nウォッチリストは空です。--watch-add で銘柄を登録してください。\n")
+        return
+
+    width = 70
+    print(f"\n{'=' * width}")
+    print(f"  ウォッチリスト ({len(watchlist)}件)")
+    print(f"{'=' * width}")
+    for w in watchlist:
+        memo = f"  {w['memo']}" if w.get("memo") else ""
+        if w["held"]:
+            ep = f"{w['entry_price']:.0f}円" if w.get("entry_price") is not None else "未登録"
+            qty = w.get("qty") if w.get("qty") is not None else "未登録"
+            print(f"  {w['symbol']:6s} [保有] 取得単価{ep} x {qty}株{memo}")
+        else:
+            print(f"  {w['symbol']:6s} [未保有]{memo}")
+    print(f"{'=' * width}\n")
+
+
+def run_advise(args) -> None:
+    """ウォッチリスト銘柄の買い時・売り時アドバイスを実行する（kabu API不要・発注なし）。"""
+    from src import db, watch_advisor
+
+    db.init_db(DB_PATH)
+    log.info("=== 買い時・売り時アドバイス 開始 ===")
+
+    advices = watch_advisor.run()
+
+    if not advices:
+        print(
+            "\nアドバイス結果: 該当なし"
+            "（ウォッチリスト未登録、データ取得失敗、またはAPI呼び出し失敗。ログを確認してください）\n"
+        )
+        log.info("=== 処理完了（該当なし） ===")
+        return
+
+    width = 70
+    print(f"\n{'=' * width}")
+    print(f"  買い時・売り時アドバイス ({len(advices)}件)")
+    print(f"{'=' * width}")
+    for a in advices:
+        print(f"  [{a['action']}] {a['symbol']}: {a['reason']}")
+        if a.get("watch_level"):
+            print(f"    目安: {a['watch_level']}")
+    print(f"{'=' * width}\n")
+    log.info("=== 処理完了 ===")
+
+
 def run_monitor(args) -> None:
     from src import realtime_monitor
 
@@ -259,6 +352,19 @@ def main() -> None:
              "yfinanceスコアのみで絞り込み、結果を見て自分で発注する）",
     )
     parser.add_argument("--dry-run", action="store_true", help="検証モード（発注なし）")
+
+    # ── ウォッチリスト（kabu API不要・発注なし） ────────────────────────────
+    parser.add_argument("--watch-add", metavar="SYMBOL", help="ウォッチリストに銘柄を登録（再登録は上書き）")
+    parser.add_argument("--held", action="store_true", help="--watch-add と併用: 保有中として登録")
+    parser.add_argument("--entry-price", type=float, help="--watch-add --held と併用: 取得単価")
+    parser.add_argument("--qty", type=int, help="--watch-add --held と併用: 株数")
+    parser.add_argument("--memo", type=str, help="--watch-add と併用: メモ")
+    parser.add_argument("--watch-remove", metavar="SYMBOL", help="ウォッチリストから銘柄を削除")
+    parser.add_argument("--watch-list", action="store_true", help="ウォッチリスト登録済み銘柄を一覧表示")
+    parser.add_argument(
+        "--advise", action="store_true",
+        help="ウォッチリスト銘柄の買い時・売り時アドバイスを実行（kabu API不要・発注なし）",
+    )
     args = parser.parse_args()
 
     if args.trade:
@@ -267,6 +373,14 @@ def main() -> None:
         run_monitor(args)
     elif args.llm_filter:
         run_llm_filter(args)
+    elif args.watch_add:
+        run_watch_add(args)
+    elif args.watch_remove:
+        run_watch_remove(args)
+    elif args.watch_list:
+        run_watch_list(args)
+    elif args.advise:
+        run_advise(args)
     else:
         run_screener(args)
 

@@ -103,6 +103,21 @@ def notify_llm_premarket_picks(selected: dict[str, str], dry_run: bool = False) 
         send(text[i:i + chunk_size], dry_run=dry_run, title="Claude寄り付き前フィルタ")
 
 
+def notify_watch_advice(advices: list[dict], dry_run: bool = False) -> None:
+    """ウォッチリスト銘柄の買い時・売り時アドバイスを通知する。"""
+    if not advices:
+        lines = ["該当銘柄なし"]
+    else:
+        lines = []
+        for a in advices:
+            level = f"\n  目安: {a['watch_level']}" if a.get("watch_level") else ""
+            lines.append(f"[{a['action']}] {a['symbol']}: {a['reason']}{level}")
+    text = "\n".join(lines)
+    chunk_size = 4000
+    for i in range(0, len(text), chunk_size):
+        send(text[i:i + chunk_size], dry_run=dry_run, title="買い時・売り時アドバイス")
+
+
 def notify_pre_entry_alert(
     symbol: str,
     name: str,
