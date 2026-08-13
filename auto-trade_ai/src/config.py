@@ -93,6 +93,7 @@ PRE_MARKET_LLM_DISCLOSURE_AFTER_HOUR: int   = int(_T.get("pre_market_llm_disclos
 PRE_MARKET_LLM_DISCLOSURE_MAX_EXTRAS: int   = int(_T.get("pre_market_llm_disclosure_max_extras", 15))
 # ウォッチリスト買い時・売り時アドバイス（--advise）
 WATCH_ADVISOR_MODEL: str    = str(_T.get("watch_advisor_model", "claude-opus-4-8"))
+CLAUDE_TP_MODEL: str        = str(_T.get("claude_tp_model", "claude-haiku-4-5-20251001"))
 FORCE_CLOSE_TIME: str       = str(_T.get("force_close_time", "15:20"))
 MIN_SCORE_TO_ENTER: float   = float(_T.get("min_score_to_enter", 60.0))
 DAILY_LOSS_LIMIT: float     = float(_T.get("daily_loss_limit", -30000))

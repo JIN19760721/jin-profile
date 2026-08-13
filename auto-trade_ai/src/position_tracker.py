@@ -20,8 +20,9 @@
 """
 
 import logging
+from datetime import datetime
 
-from src import db
+from src import db, claude_tp_advisor
 from src.config import (
     PROFIT_LOCK_BREAKEVEN_FLOOR_PCT,
     PROFIT_LOCK_BREAKEVEN_TRIGGER_RATIO,
@@ -115,12 +116,53 @@ class PositionTracker:
             if pnl_pct <= floor_pct:
                 reason = "STOP_LOSS" if floor_pct <= sl_pct else "TAKE_PROFIT_LOCK"
 
-            # ── 利確判定 ─────────────────────────────────────────────
-            elif path in ("C", "D"):
+            # ── 利確判定（経路C: 即利確） ─────────────────────────────
+            elif path == "C":
                 if pnl_pct >= tp_pct:
-                    reason = "TAKE_PROFIT"  # 経路C/D: キープゾーンなしで即利確
+                    reason = "TAKE_PROFIT"
                 else:
                     log.debug("監視中: %s 損益率 %+.2f%%", symbol, pnl_pct)
+                    continue
+
+            # ── 利確判定（経路D: Claude判断 → HOLD ならトレーリング） ──
+            elif path == "D":
+                if symbol not in self._keep_zone and pnl_pct >= tp_pct:
+                    surge_data = db.get_latest_surge_data(symbol) or {}
+                    held_min = (
+                        datetime.now() - datetime.fromisoformat(pos["opened_at"])
+                    ).total_seconds() / 60
+                    action, claude_reason = claude_tp_advisor.advise(
+                        symbol=symbol,
+                        name=pos.get("symbol_name") or "",
+                        entry_price=entry,
+                        current_price=current,
+                        pnl_pct=pnl_pct,
+                        peak_pnl_pct=peak_pnl_pct,
+                        held_minutes=held_min,
+                        surge_data=surge_data,
+                    )
+                    if action == "TAKE_PROFIT":
+                        reason = "TAKE_PROFIT"
+                    else:
+                        self._keep_zone.add(symbol)
+                        log.info(
+                            "[経路D] %s Claude→HOLD: %s / トレーリングストップに移行",
+                            symbol, claude_reason,
+                        )
+                        continue
+                elif symbol in self._keep_zone:
+                    # HOLD後: トレーリングストップのみで管理
+                    trailing_drop = (peak - current) / peak * 100
+                    if trailing_drop >= TAKE_PROFIT_TRAILING_PCT:
+                        reason = "TAKE_PROFIT_TRAIL"
+                    else:
+                        log.debug(
+                            "[経路D] キープ: %s %+.2f%% 高値%.0f (押し%.2f%%)",
+                            symbol, pnl_pct, peak, trailing_drop,
+                        )
+                        continue
+                else:
+                    log.debug("監視中(D): %s 損益率 %+.2f%%", symbol, pnl_pct)
                     continue
 
             elif symbol in self._keep_zone:

@@ -20,12 +20,8 @@ from src.config import (
     DB_PATH,
     ENTRY_EMBARGO_MIN,
     FORCE_CLOSE_TIME,
-    MIN_SCORE_TO_ENTER,
-    MIN_SURGE_SCORE,
     ORDER_PRICE_BUFFER_PCT,
     ORDER_QTY,
-    PATHC_ENABLED,
-    PATHC_MIN_SURGE,
     PATHD_ENABLED,
     PATHD_MIN_VOLUME_SPIKE,
     PATHD_CONFIRM_MIN,
@@ -35,17 +31,12 @@ from src.config import (
     PRE_MARKET_LLM_TIME,
     PRE_MARKET_SCAN_TIME,
     PRE_MARKET_YFINANCE_TIME,
-    SURGE_BYPASS_MIN_SCORE,
-    SURGE_BYPASS_MIN_SURGE,
-    SURGE_CONFIRM_MIN,
     SURGE_HIST_DAYS,
     SURGE_NOTIFY_DELTA,
     SURGE_NOTIFY_ENABLED,
     SURGE_NOTIFY_ON_TRANSITION_ONLY,
-    PRE_ENTRY_NOTIFY_ENABLED,
     TRADE_EXCHANGE,
     TRADING_SESSIONS,
-    USE_SURGE_SCORE_FILTER,
 )
 from src import premarket_llm_filter
 from src.entry_policy import check as policy_check
@@ -400,131 +391,32 @@ class TradeEngine:
                 before, len(raw_candidates),
             )
 
-        # ③ surge 評価対象: 経路C有効時は score 不問で全件、それ以外は score>=40
-        if USE_SURGE_SCORE_FILTER and PATHC_ENABLED:
-            broad_filtered = raw_candidates  # 経路C: score不問
-        else:
-            min_score = min(MIN_SCORE_TO_ENTER, SURGE_BYPASS_MIN_SCORE)
-            broad_filtered = [c for c in raw_candidates if (c.get("score") or 0) >= min_score]
-        price_filtered = self._rm.filter_by_price(broad_filtered)
+        # ③ 全候補を price フィルタ後に surge 評価
+        price_filtered = self._rm.filter_by_price(raw_candidates)
 
-        # ④ surge_score 評価（経路A+B 両方の候補を対象）
+        # ④ surge_score 評価
         self._evaluate_surge_scores(price_filtered)
 
-        # ⑤ 3経路フィルタ
-        path_b_symbols: set[str] = set()
-        path_c_symbols: set[str] = set()
-        if USE_SURGE_SCORE_FILTER:
-            # 経路A: ランキング主導 — score>=60 かつ surge>=70 (CANDIDATE/STRONG) かつ N回連続確認
-            path_a = [
-                c for c in price_filtered
-                if (c.get("score") or 0) >= MIN_SCORE_TO_ENTER
-                and (c.get("surge_score") or 0) >= MIN_SURGE_SCORE
-                and c.get("surge_signal") in ("SURGE_CANDIDATE", "SURGE_STRONG")
-                and (c.get("surge_confirm_count") or 0) >= SURGE_CONFIRM_MIN
-            ]
-            # 経路B: 急騰主導 — surge>=85 (STRONG) かつ score>=40 かつ N回連続確認（経路A未選出分のみ）
-            path_a_symbols = {c.get("symbol") for c in path_a}
-            path_b = [
-                c for c in price_filtered
-                if c.get("symbol") not in path_a_symbols
-                and (c.get("surge_score") or 0) >= SURGE_BYPASS_MIN_SURGE
-                and c.get("surge_signal") == "SURGE_STRONG"
-                and (c.get("score") or 0) >= SURGE_BYPASS_MIN_SCORE
-                and (c.get("surge_confirm_count") or 0) >= SURGE_CONFIRM_MIN
-            ]
-            path_b_symbols = {c.get("symbol") for c in path_b}
-            # 経路C: score不問 — surge>=92 (STRONG) かつ N回連続確認（A/B未選出分のみ）
-            path_c: list[dict] = []
-            if PATHC_ENABLED:
-                path_ab_symbols = path_a_symbols | path_b_symbols
-                path_c = [
-                    c for c in price_filtered
-                    if c.get("symbol") not in path_ab_symbols
-                    and (c.get("surge_score") or 0) >= PATHC_MIN_SURGE
-                    and c.get("surge_signal") == "SURGE_STRONG"
-                    and (c.get("surge_confirm_count") or 0) >= SURGE_CONFIRM_MIN
-                ]
-                path_c_symbols = {c.get("symbol") for c in path_c}
-            # 経路D: 出来高先行エントリー — PRE_SURGE_SETUP（価格未動・上がる前に入る）
-            path_d: list[dict] = []
-            path_d_symbols: set[str] = set()
-            if PATHD_ENABLED:
-                path_abc_symbols = path_a_symbols | path_b_symbols | path_c_symbols
-                path_d = [
-                    c for c in price_filtered
-                    if c.get("symbol") not in path_abc_symbols
-                    and c.get("surge_signal") == "PRE_SURGE_SETUP"
-                    and (c.get("volume_spike_ratio") or 0) >= PATHD_MIN_VOLUME_SPIKE
-                    and (c.get("pre_surge_confirm_count") or 0) >= PATHD_CONFIRM_MIN
-                ]
-                path_d_symbols = {c.get("symbol") for c in path_d}
-
-            entry_candidates = path_a + path_b + path_c + path_d
-            log.info(
-                "エントリー候補: 経路A=%d件 / 経路B=%d件 / 経路C=%d件 / 経路D=%d件 → 合計%d件",
-                len(path_a), len(path_b), len(path_c), len(path_d), len(entry_candidates),
-            )
-        else:
+        # ⑤ 経路D のみ: PRE_SURGE_SETUP（価格未動・出来高先行）
+        path_d_symbols: set[str] = set()
+        entry_candidates: list[dict] = []
+        if PATHD_ENABLED:
             entry_candidates = [
                 c for c in price_filtered
-                if (c.get("score") or 0) >= MIN_SCORE_TO_ENTER
+                if c.get("surge_signal") == "PRE_SURGE_SETUP"
+                and (c.get("volume_spike_ratio") or 0) >= PATHD_MIN_VOLUME_SPIKE
+                and (c.get("pre_surge_confirm_count") or 0) >= PATHD_CONFIRM_MIN
             ]
-
-        # ⑤-b エントリー直前アラート（confirm_min-1 回目に達した銘柄を通知）
-        if PRE_ENTRY_NOTIFY_ENABLED and SURGE_CONFIRM_MIN >= 2:
-            for c in price_filtered:
-                sym     = c.get("symbol") or ""
-                confirm = c.get("surge_confirm_count") or 0
-                signal  = c.get("surge_signal") or ""
-                # エントリー候補ではなく、あと1回で到達する銘柄のみ
-                is_entry = any(sym == ec.get("symbol") for ec in entry_candidates)
-                if (
-                    not is_entry
-                    and confirm == SURGE_CONFIRM_MIN - 1
-                    and signal in ("SURGE_CANDIDATE", "SURGE_STRONG")
-                    and sym not in self._pre_entry_notified
-                ):
-                    # 経路判定
-                    surge = c.get("surge_score") or 0
-                    score = c.get("score") or 0
-                    if surge >= PATHC_MIN_SURGE and PATHC_ENABLED:
-                        alert_path = "C"
-                    elif surge >= SURGE_BYPASS_MIN_SURGE and score >= SURGE_BYPASS_MIN_SCORE:
-                        alert_path = "B"
-                    else:
-                        alert_path = "A"
-                    notifier.notify_pre_entry_alert(
-                        symbol=sym,
-                        name=c.get("symbol_name") or "",
-                        price=c.get("board_price") or c.get("current_price") or 0,
-                        surge_score=surge,
-                        surge_signal=signal,
-                        entry_path=alert_path,
-                        confirm_count=confirm,
-                        confirm_min=SURGE_CONFIRM_MIN,
-                        dry_run=self.dry_run,
-                    )
-                    self._pre_entry_notified.add(sym)
-                elif confirm == 0 or is_entry:
-                    # エントリー済み or surge消失 → 次回また通知できるようリセット
-                    self._pre_entry_notified.discard(sym)
+            path_d_symbols = {c.get("symbol") for c in entry_candidates}
+            log.info("エントリー候補（経路D）: %d件", len(entry_candidates))
 
         # ⑥ エントリーループ
         for c in entry_candidates:
-            symbol     = c.get("symbol") or ""
-            name       = c.get("symbol_name") or ""
-            price      = c.get("current_price") or 0
-            # リアルタイム板価格を優先（surge評価時にセット済み）
+            symbol      = c.get("symbol") or ""
+            name        = c.get("symbol_name") or ""
+            price       = c.get("current_price") or 0
             board_price = c.get("board_price") or price
-            if symbol in path_d_symbols:
-                entry_path = "D"
-            elif symbol in path_c_symbols:
-                entry_path = "C"
-            elif symbol in path_b_symbols:
-                entry_path = "B"
-            else:
-                entry_path = "A"
+            entry_path  = "D"
 
             if board_price <= 0:
                 continue

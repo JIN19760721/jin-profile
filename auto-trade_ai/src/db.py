@@ -542,6 +542,21 @@ def save_surge_score(
         )
 
 
+def get_latest_surge_data(symbol: str, db_path: Path = DB_PATH) -> dict | None:
+    """本日の最新 surge スコアデータを返す（Claude TP advisor に渡す）。"""
+    today = _today()
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            """SELECT surge_score, surge_signal, surge_reason,
+                      volume_spike_ratio, turnover_spike_ratio,
+                      price_change_1m, price_change_3m, price_change_5m,
+                      vwap_position, near_day_high_ratio
+               FROM daily_candidates WHERE date=? AND symbol=?""",
+            (today, symbol),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def get_previous_surge_score(symbol: str, db_path: Path = DB_PATH) -> float | None:
     """直近の surge_score を返す（未計算なら None）。"""
     today = _today()
