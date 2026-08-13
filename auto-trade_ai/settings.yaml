@@ -4,16 +4,9 @@ trade:
   max_positions: 5              # 最大同時保有銘柄数
   min_stock_price: 100          # 最低株価（円）。呼値1円が%ベースの損切り/利確ラインに対して
                                  # 粗くなりすぎる超低位株（例: 50円=呼値だけで2%相当）を除外する
-  stop_loss_pct: -3.0           # 経路A 損切りライン（%）
-  stop_loss_pct_b: -2.0         # 経路B 損切りライン（%、タイト）
-  stop_loss_pct_c: -1.5         # 経路C 損切りライン（%、超タイト）
-  take_profit_pct: 8.0          # 経路A 利確ライン（%）。この水準を超えたらキープゾーンへ
-  take_profit_pct_b: 5.0        # 経路B 利確ライン（%、早め）
-  take_profit_pct_c: 3.0        # 経路C 利確ライン（%、即利確）
-  take_profit_rci_threshold: 80.0  # キープゾーン中にRCIがこの値以上で利確
   take_profit_trailing_pct: 3.0    # キープゾーン中に高値からこれだけ押したら強制利確
-  # 利益ロック（take_profit_pct到達前の無防備地帯対策。経路Cは対象外）
-  # 高値時点の含み益が take_profit_pct * trigger_ratio に達したら防御ラインを引き上げる
+  # 利益ロック（take_profit_pct_d到達前の無防備地帯対策）
+  # 高値時点の含み益が take_profit_pct_d * trigger_ratio に達したら防御ラインを引き上げる
   profit_lock_breakeven_trigger_ratio: 0.25  # ブレークイーブン確保の発動比率
   profit_lock_breakeven_floor_pct: 0.5       # ブレークイーブン確保時の下限（%）
   profit_lock_partial_trigger_ratio: 0.5     # 部分トレーリング開始の発動比率
@@ -35,7 +28,6 @@ trade:
   pre_market_llm_disclosure_max_extras: 15     # モメンタム候補外から開示のみで補完する銘柄数の上限
   watch_advisor_model: "claude-opus-4-8"       # ウォッチリスト買い時・売り時アドバイス（--advise）で使うモデル
   force_close_time: "15:20"     # 強制全ポジション決済時刻
-  min_score_to_enter: 60.0      # この score 以上の銘柄のみエントリー対象
   daily_loss_limit: -30000      # 日次損失上限（円）。超過したら新規発注停止
   reentry_cooldown_minutes: 60  # 同一銘柄を当日決済後、再エントリーまでの待機時間（分）。0で無効
   allow_same_day_reentry: false # 現物取引の差金決済制限が未確認のため、同一銘柄は1日1往復までに制限（安全側）
@@ -53,26 +45,16 @@ trade:
                                  # 5分あれば price_cache（1分足履歴）が安定し surge_score の計算精度が確保できる。
 
 surge:
-  use_surge_score_filter: true  # false にすると score>=60 のみでエントリー（従来動作）
-  min_surge_score: 70.0         # 経路A: score>=60 銘柄に必要な最低 surge_score
   surge_strong_score: 85.0      # SURGE_STRONG 閾値
   surge_candidate_score: 70.0   # SURGE_CANDIDATE 閾値
   surge_watch_score: 50.0       # SURGE_WATCH 閾値
   surge_notify_delta: 10.0      # この値以上変化した場合のみ LINE 通知
   surge_notify_enabled: false   # surge 通知を無効化（LINE月200通上限節約）
   surge_hist_days: 20           # 急増率の比較基準となる過去日数
-  bypass_min_surge: 85.0        # 経路B: score<60 でもエントリー可とする surge 閾値
-  bypass_min_score: 40.0        # 経路B: bypass 時に必要な最低 score
   order_price_buffer_pct: 0.3   # 発注価格バッファ（%）急騰中の未約定防止
-  pathc_enabled: true           # 経路C 有効/無効
-  pathc_min_surge: 92.0         # 経路C: score不問でエントリー可とする surge 閾値
-  confirm_min: 2                # surge閾値をこの回数連続で超えた場合のみエントリー許可（瞬間値誤エントリー防止）
 
 entry_policy:
   enabled: true
   hourly_ma_short: 5
   hourly_ma_long: 20
-  min1_ma_period: 5
-  rci_period: 9
-  rci_approach_threshold: -80
-  rci_lookback_bars: 10
+  rci_period: 9  # watch_advisor.py の RCI 表示で使用

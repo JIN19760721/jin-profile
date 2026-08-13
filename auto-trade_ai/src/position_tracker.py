@@ -49,6 +49,8 @@ class PositionTracker:
         # 60秒サイクルで更新されるClaude利確判断キャッシュ
         self._claude_decisions: dict[str, str] = {}   # symbol → "TAKE_PROFIT" | "HOLD"
         self._claude_reasons:   dict[str, str] = {}   # symbol → 理由文字列
+        # check_all() で取得した直近価格（同一tickでの board API 二重呼び出しを防ぐ）
+        self._last_price: dict[str, float] = {}
 
     def get_current_price(self, symbol: str) -> float | None:
         """/board から現在値を取得する。"""
@@ -74,6 +76,7 @@ class PositionTracker:
             current = self.get_current_price(symbol)
             if current is None:
                 continue
+            self._last_price[symbol] = current
 
             pnl_pct = (current - entry) / entry * 100
             db.update_position_max_pnl_pct(symbol, pnl_pct, dry_run=self.dry_run)
@@ -163,7 +166,7 @@ class PositionTracker:
 
             # 上昇基調: surge が強く、直近1分で価格上昇中、かつ高値圏でない
             uptrend = (
-                surge_signal in ("SURGE_STRONG", "SURGE_CANDIDATE")
+                surge_signal in ("SURGE_STRONG", "SURGE_CANDIDATE", "PRE_SURGE_SETUP")
                 and price_change_1m > 0
                 and near_day_high < 0.99
             )
@@ -178,7 +181,7 @@ class PositionTracker:
 
             # モメンタム低下 → Claude に最終判断を委ねる
             entry   = pos["entry_price"]
-            current = self.get_current_price(symbol)
+            current = self._last_price.get(symbol) or self.get_current_price(symbol)
             if current is None:
                 continue
 

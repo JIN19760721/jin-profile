@@ -38,6 +38,7 @@ _MARKET_OPEN = time(9, 0)
 _LUNCH_START = time(11, 30)
 _LUNCH_END   = time(12, 30)
 _TOTAL_TRADING_MINUTES = 330.0  # 前場150 + 後場180
+_MIN_NORM_MINUTES = 30.0  # 寄り付き直後の出来高過大正規化を防ぐ下限
 
 
 def _elapsed_trading_minutes() -> float:
@@ -169,7 +170,7 @@ def calculate_surge_score(
         elapsed_minutes = _elapsed_trading_minutes()
 
     # ── 急増率の計算（経過時間で正規化） ─────────────────────────────────
-    time_ratio = max(elapsed_minutes / _TOTAL_TRADING_MINUTES, 1 / _TOTAL_TRADING_MINUTES)
+    time_ratio = max(elapsed_minutes / _TOTAL_TRADING_MINUTES, _MIN_NORM_MINUTES / _TOTAL_TRADING_MINUTES)
 
     if avg_volume_20d > 0:
         projected_volume   = today_volume / time_ratio

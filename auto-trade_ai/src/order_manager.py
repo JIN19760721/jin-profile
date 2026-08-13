@@ -34,7 +34,7 @@ class OrderManager:
         price: float,
         qty: int,
         exchange: int = 1,
-        entry_path: str = "A",
+        entry_path: str = "D",
         entry_signal: dict | None = None,
     ) -> str | None:
         # 急騰中の未約定を防ぐため発注価格にバッファを上乗せ
@@ -207,7 +207,7 @@ class OrderManager:
                         db.insert_position(
                             order["symbol"], order["symbol_name"], qty,
                             filled_price, oid, dry_run=self.dry_run,
-                            entry_path=order.get("entry_path", "A"),
+                            entry_path=order.get("entry_path", "D"),
                             entry_signal={
                                 "score": order.get("entry_score"),
                                 "surge_score": order.get("entry_surge_score"),

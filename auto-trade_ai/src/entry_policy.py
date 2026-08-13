@@ -1,9 +1,9 @@
 """
-エントリーポリシー判定（3条件すべて AND）。
+エントリーポリシー判定。
 
 ① 1時間足が上昇トレンド: MA5(1H) > MA20(1H) かつ MA5 の傾きが正
-② 1分足の移動平均が上昇: MA5(1M) の最新値 > 1本前
-③ RCI(9) が -80 以下に接近後、反転上昇中
+
+1分足MAとRCIによるエントリー判定はsurge_scoreが実質的にカバーするため廃止済み。
 
 データソース: yfinance（kabu station には分足/時間足の過去データAPIがないため）
 """
@@ -18,11 +18,6 @@ from src.config import (
     ENTRY_POLICY_ENABLED,
     HOURLY_MA_LONG,
     HOURLY_MA_SHORT,
-    MIN1_MA_PERIOD,
-    TAKE_PROFIT_RCI_THRESHOLD,
-    RCI_APPROACH_THRESHOLD,
-    RCI_LOOKBACK_BARS,
-    RCI_PERIOD,
 )
 
 log = logging.getLogger(__name__)
@@ -88,70 +83,6 @@ def _check_hourly_uptrend(symbol: str) -> tuple[bool, str]:
         return False, f"1H データ取得エラー: {e}"
 
 
-def _check_min1_ma_rising(symbol: str) -> tuple[bool, str]:
-    """② 1分足の移動平均が上昇しているか確認する。"""
-    try:
-        df = yf.download(
-            _yf_symbol(symbol), interval="1m", period="1d",
-            progress=False, auto_adjust=True, multi_level_index=False,
-        )
-        if df is None or len(df) < MIN1_MA_PERIOD + 1:
-            return False, f"1分足データ不足 ({len(df) if df is not None else 0}本)"
-
-        closes = df["Close"].tolist()
-        ma = pd.Series(closes).rolling(MIN1_MA_PERIOD).mean().tolist()
-
-        if ma[-1] is None or ma[-2] is None:
-            return False, "1分足 MA 計算不足"
-
-        if ma[-1] <= ma[-2]:
-            return False, f"1分足 MA{MIN1_MA_PERIOD} 下降 ({ma[-2]:.2f}→{ma[-1]:.2f})"
-
-        return True, f"1分足 MA{MIN1_MA_PERIOD} 上昇"
-
-    except Exception as e:
-        return False, f"1分足データ取得エラー: {e}"
-
-
-def _check_rci_reversal(symbol: str) -> tuple[bool, str]:
-    """③ RCI が -80 以下に接近後、反転上昇中か確認する。"""
-    need = RCI_PERIOD + RCI_LOOKBACK_BARS + 2
-    try:
-        df = yf.download(
-            _yf_symbol(symbol), interval="1m", period="1d",
-            progress=False, auto_adjust=True, multi_level_index=False,
-        )
-        if df is None or len(df) < need:
-            return False, f"RCI 用データ不足 ({len(df) if df is not None else 0}本 / 必要 {need}本)"
-
-        closes = df["Close"].tolist()
-        # 直近 lookback+2 本分の RCI 系列を計算
-        rci_series: list[float] = []
-        for i in range(RCI_LOOKBACK_BARS + 2):
-            end = len(closes) - i
-            rci_series.insert(0, _calc_rci(closes[:end], RCI_PERIOD))
-
-        touched = any(r <= RCI_APPROACH_THRESHOLD for r in rci_series[:-1])
-        rising  = rci_series[-1] > rci_series[-2]
-        recovered = rci_series[-1] > RCI_APPROACH_THRESHOLD
-
-        rci_tail = " ".join(f"{r:.0f}" for r in rci_series[-5:])
-        log.info("[RCI] %s 直近5本: [%s]  touched=%s rising=%s recovered=%s",
-                 symbol, rci_tail, touched, rising, recovered)
-
-        if not touched:
-            return False, f"RCI が {RCI_APPROACH_THRESHOLD} 以下に未到達 (直近: {rci_series[-1]:.1f})"
-        if not rising:
-            return False, f"RCI 反転上昇 NG ({rci_series[-2]:.1f}→{rci_series[-1]:.1f})"
-        if not recovered:
-            return False, f"RCI まだ閾値以下 ({rci_series[-1]:.1f})"
-
-        return True, f"RCI 反転上昇 ({rci_series[-2]:.1f}→{rci_series[-1]:.1f})"
-
-    except Exception as e:
-        return False, f"RCI 計算エラー: {e}"
-
-
 def check(symbol: str) -> tuple[bool, str]:
     """1H上昇トレンドのみ確認してエントリー可否を返す。(ok, reason_str)
 
@@ -175,41 +106,3 @@ def check(symbol: str) -> tuple[bool, str]:
 
     _uptrend_cache[symbol] = (now, result[0], result[1])
     return result
-
-
-def check_rci_overbought(symbol: str) -> tuple[bool, str]:
-    """RCI が過買い水準（+80以上）に達しているか確認する。
-
-    利確キープゾーン中に毎 tick 呼ばれる。
-    ① board価格履歴（price_cache）を優先（ノーウェイト）
-    ② データ不足時のみ yfinance を1回だけ試みる
-    ③ 両方失敗した場合は True（強制利確）
-    """
-    from src import price_cache
-
-    need = RCI_PERIOD + 2
-
-    # ① board価格履歴を優先（trade_engine が 60 秒ごとに蓄積）
-    cached = price_cache.get(symbol)
-    if len(cached) >= need:
-        rci = _calc_rci(cached, RCI_PERIOD)
-        if rci >= TAKE_PROFIT_RCI_THRESHOLD:
-            return True, f"RCI {rci:.1f} >= {TAKE_PROFIT_RCI_THRESHOLD:.0f}"
-        return False, f"RCI {rci:.1f} < {TAKE_PROFIT_RCI_THRESHOLD:.0f}（キープ）"
-
-    # ② board履歴不足 → yfinance を1回だけ試みる
-    try:
-        df = yf.download(
-            _yf_symbol(symbol), interval="1m", period="1d",
-            progress=False, auto_adjust=True, multi_level_index=False,
-        )
-        if df is None or len(df) < need:
-            return True, f"1分足データ不足({len(df) if df is not None else 0}本) → 強制利確"
-        closes = df["Close"].tolist()
-        rci = _calc_rci(closes, RCI_PERIOD)
-        if rci >= TAKE_PROFIT_RCI_THRESHOLD:
-            return True, f"RCI {rci:.1f} >= {TAKE_PROFIT_RCI_THRESHOLD:.0f}"
-        return False, f"RCI {rci:.1f} < {TAKE_PROFIT_RCI_THRESHOLD:.0f}（キープ）"
-    except Exception as e:
-        log.warning("check_rci_overbought %s yfinance失敗: %s → 強制利確", symbol, e)
-        return True, f"yfinance失敗 → 強制利確: {e}"
