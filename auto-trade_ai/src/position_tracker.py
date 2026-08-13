@@ -1,22 +1,21 @@
 """
-ポジション管理・損益計算・損切り/利確判定。
+ポジション管理・損益計算・損切り/利確判定（経路D専用）。
 
-利確ロジック（経路A/Bのみ。経路Cは即利確でキープゾーン・利益ロックとも対象外）:
+利確ロジック:
 
   高値時点の含み益(peak_pnl_pct)に応じて防御ライン(floor_pct)が段階的に切り上がる:
-    peak_pnl_pct <  tp_pct * 0.25   → 防御なし（sl_pct のみ = 通常の損切りライン）
+    peak_pnl_pct <  tp_pct * 0.25   → 防御なし（sl_pct のみ）
     peak_pnl_pct >= tp_pct * 0.25   → ブレークイーブン確保（floor = breakeven_floor_pct）
     peak_pnl_pct >= tp_pct * 0.50   → 部分トレーリング（floor = peak_pnl_pct - partial_trail_pct）
-    peak_pnl_pct >= tp_pct          → キープゾーン突入（以後 pnl_pct が tp_pct を割り込んでも維持）
-      ├─ RCI ≥ +80                 → 利確（TAKE_PROFIT）
-      ├─ 高値から -N%               → 強制利確（TAKE_PROFIT_TRAIL）
-      └─ それ以外                   → キープ継続
+    peak_pnl_pct >= tp_pct          → キープゾーン突入
 
-  ※ tp_pct 到達前は「無防備地帯」対策として floor_pct のみで判定する
-    （TAKE_PROFIT_LOCK）。tp_pct 到達後はキープゾーン側のトレーリング/RCIに一任する。
-  ※ キープゾーンは一度到達したら損切りラインに触れるかトレーリング/RCIで
-    決済されるまで維持する（ポーリングの間に pnl_pct が利確ラインを
-    跨いで上下しただけでキープ判定が抜け落ちないようにするため）。
+  キープゾーン内の判定（60秒サイクルの refresh_claude_judgments() がキャッシュを更新）:
+    ├─ 高値から -N%（トレーリングストップ）→ 即利確（TAKE_PROFIT_TRAIL）
+    ├─ surge 上昇基調継続               → HOLD キャッシュ（Claude 呼ばず）
+    └─ モメンタム低下検知               → Claude が最終判断（TAKE_PROFIT or HOLD）
+
+  ※ キープゾーンは一度到達したら損切りラインに触れるかトレーリング/Claudeで
+    決済されるまで維持する。
 """
 
 import logging
@@ -28,17 +27,10 @@ from src.config import (
     PROFIT_LOCK_BREAKEVEN_TRIGGER_RATIO,
     PROFIT_LOCK_PARTIAL_TRAIL_PCT,
     PROFIT_LOCK_PARTIAL_TRIGGER_RATIO,
-    STOP_LOSS_PCT,
-    STOP_LOSS_PCT_B,
-    STOP_LOSS_PCT_C,
     STOP_LOSS_PCT_D,
-    TAKE_PROFIT_PCT,
-    TAKE_PROFIT_PCT_B,
-    TAKE_PROFIT_PCT_C,
     TAKE_PROFIT_PCT_D,
     TAKE_PROFIT_TRAILING_PCT,
 )
-from src.entry_policy import check_rci_overbought
 from src.kabu_client import KabuClient
 
 log = logging.getLogger(__name__)
@@ -50,10 +42,13 @@ class PositionTracker:
     def __init__(self, client: KabuClient, dry_run: bool = False) -> None:
         self._client = client
         self.dry_run = dry_run
-        # symbol → 当日高値（キープゾーン用トレーリングストップ）
+        # symbol → 当日高値（トレーリングストップ用）
         self._peak_prices: dict[str, float] = {}
         # 一度でも tp_pct に到達した symbol の集合（キープゾーンを維持するため）
         self._keep_zone: set[str] = set()
+        # 60秒サイクルで更新されるClaude利確判断キャッシュ
+        self._claude_decisions: dict[str, str] = {}   # symbol → "TAKE_PROFIT" | "HOLD"
+        self._claude_reasons:   dict[str, str] = {}   # symbol → 理由文字列
 
     def get_current_price(self, symbol: str) -> float | None:
         """/board から現在値を取得する。"""
@@ -73,19 +68,8 @@ class PositionTracker:
         for pos in positions:
             symbol = pos["symbol"]
             entry  = pos["entry_price"]
-            path   = pos.get("entry_path", "A")
-            if path == "D":
-                sl_pct = STOP_LOSS_PCT_D
-                tp_pct = TAKE_PROFIT_PCT_D
-            elif path == "C":
-                sl_pct = STOP_LOSS_PCT_C
-                tp_pct = TAKE_PROFIT_PCT_C
-            elif path == "B":
-                sl_pct = STOP_LOSS_PCT_B
-                tp_pct = TAKE_PROFIT_PCT_B
-            else:
-                sl_pct = STOP_LOSS_PCT
-                tp_pct = TAKE_PROFIT_PCT
+            sl_pct = STOP_LOSS_PCT_D
+            tp_pct = TAKE_PROFIT_PCT_D
 
             current = self.get_current_price(symbol)
             if current is None:
@@ -99,14 +83,13 @@ class PositionTracker:
             self._peak_prices[symbol] = peak
             peak_pnl_pct = (peak - entry) / entry * 100
 
-            # ── キープゾーン到達判定（経路A/Bのみ。一度到達したら維持する）──
-            # 経路C/D: キープゾーンなし（tp_pct到達で即利確）
-            if path not in ("C", "D") and pnl_pct >= tp_pct:
+            # ── キープゾーン到達判定（一度到達したら維持する）────────────
+            if pnl_pct >= tp_pct:
                 self._keep_zone.add(symbol)
 
-            # ── 利益ロック床の算出（経路A/Bのみ、tp_pct未到達の間だけ機能）──
+            # ── 利益ロック床の算出（tp_pct 未到達の間のみ機能）──────────
             floor_pct = sl_pct
-            if path not in ("C", "D") and peak_pnl_pct < tp_pct:
+            if peak_pnl_pct < tp_pct:
                 if peak_pnl_pct >= tp_pct * PROFIT_LOCK_PARTIAL_TRIGGER_RATIO:
                     floor_pct = max(floor_pct, peak_pnl_pct - PROFIT_LOCK_PARTIAL_TRAIL_PCT)
                 elif peak_pnl_pct >= tp_pct * PROFIT_LOCK_BREAKEVEN_TRIGGER_RATIO:
@@ -116,59 +99,22 @@ class PositionTracker:
             if pnl_pct <= floor_pct:
                 reason = "STOP_LOSS" if floor_pct <= sl_pct else "TAKE_PROFIT_LOCK"
 
-            # ── 利確判定（経路C: 即利確） ─────────────────────────────
-            elif path == "C":
-                if pnl_pct >= tp_pct:
-                    reason = "TAKE_PROFIT"
+            # ── キープゾーン: トレーリング優先 → キャッシュ済みClaude判断 ─
+            elif symbol in self._keep_zone:
+                trailing_drop = (peak - current) / peak * 100
+                if trailing_drop >= TAKE_PROFIT_TRAILING_PCT:
+                    reason = "TAKE_PROFIT_TRAIL"
                 else:
-                    log.debug("監視中: %s 損益率 %+.2f%%", symbol, pnl_pct)
-                    continue
-
-            # ── 利確判定（経路D: Claude判断 → HOLD ならトレーリング） ──
-            elif path == "D":
-                if symbol not in self._keep_zone and pnl_pct >= tp_pct:
-                    surge_data = db.get_latest_surge_data(symbol) or {}
-                    held_min = (
-                        datetime.now() - datetime.fromisoformat(pos["opened_at"])
-                    ).total_seconds() / 60
-                    action, claude_reason = claude_tp_advisor.advise(
-                        symbol=symbol,
-                        name=pos.get("symbol_name") or "",
-                        entry_price=entry,
-                        current_price=current,
-                        pnl_pct=pnl_pct,
-                        peak_pnl_pct=peak_pnl_pct,
-                        held_minutes=held_min,
-                        surge_data=surge_data,
-                    )
+                    action        = self._claude_decisions.get(symbol, "HOLD")
+                    claude_reason = self._claude_reasons.get(symbol, "判断待ち")
                     if action == "TAKE_PROFIT":
                         reason = "TAKE_PROFIT"
                     else:
-                        self._keep_zone.add(symbol)
                         log.info(
-                            "[経路D] %s Claude→HOLD: %s / トレーリングストップに移行",
-                            symbol, claude_reason,
+                            "キープ継続: %s %+.2f%% 高値%.0f (押し%.2f%%) — %s",
+                            symbol, pnl_pct, peak, trailing_drop, claude_reason,
                         )
                         continue
-                elif symbol in self._keep_zone:
-                    # HOLD後: トレーリングストップのみで管理
-                    trailing_drop = (peak - current) / peak * 100
-                    if trailing_drop >= TAKE_PROFIT_TRAILING_PCT:
-                        reason = "TAKE_PROFIT_TRAIL"
-                    else:
-                        log.debug(
-                            "[経路D] キープ: %s %+.2f%% 高値%.0f (押し%.2f%%)",
-                            symbol, pnl_pct, peak, trailing_drop,
-                        )
-                        continue
-                else:
-                    log.debug("監視中(D): %s 損益率 %+.2f%%", symbol, pnl_pct)
-                    continue
-
-            elif symbol in self._keep_zone:
-                reason = self._check_take_profit(symbol, current, peak, pnl_pct)
-                if reason is None:
-                    continue  # キープ継続
 
             else:
                 log.debug("監視中: %s 損益率 %+.2f%% (高値%+.2f%%)", symbol, pnl_pct, peak_pnl_pct)
@@ -186,6 +132,8 @@ class PositionTracker:
             db.close_position(symbol, current, reason, pnl, pnl_pct)
             self._peak_prices.pop(symbol, None)
             self._keep_zone.discard(symbol)
+            self._claude_decisions.pop(symbol, None)
+            self._claude_reasons.pop(symbol, None)
             triggered.append({
                 **pos,
                 "close_price":  current,
@@ -196,42 +144,67 @@ class PositionTracker:
 
         return triggered
 
-    def _check_take_profit(
-        self,
-        symbol: str,
-        current: float,
-        peak: float,
-        pnl_pct: float,
-    ) -> str | None:
-        """
-        キープゾーン内の利確判定。
+    def refresh_claude_judgments(self) -> None:
+        """60秒サイクルで呼ぶ: キープゾーン中ポジションの利確判断をキャッシュする。
 
-        Returns
-        -------
-        str   : クローズ理由（"TAKE_PROFIT" or "TAKE_PROFIT_TRAIL"）
-        None  : キープ継続
+        surge データが上昇基調を示す間は HOLD をキャッシュ（Claude 呼び出しなし）。
+        モメンタム低下を検知した時点で初めて Claude に最終判断させる。
         """
-        # ① トレーリングストップ（高値から -N% 押し）
-        trailing_drop = (peak - current) / peak * 100
-        if trailing_drop >= TAKE_PROFIT_TRAILING_PCT:
-            log.info(
-                "トレーリングストップ: %s 高値%.0f→現在%.0f (%.2f%%押し)",
-                symbol, peak, current, trailing_drop,
+        positions = db.get_open_positions(dry_run=self.dry_run)
+        for pos in positions:
+            symbol = pos["symbol"]
+            if symbol not in self._keep_zone:
+                continue
+
+            surge_data      = db.get_latest_surge_data(symbol) or {}
+            surge_signal    = surge_data.get("surge_signal") or "NO_SURGE"
+            price_change_1m = surge_data.get("price_change_1m") or 0.0
+            near_day_high   = surge_data.get("near_day_high_ratio") or 0.0
+
+            # 上昇基調: surge が強く、直近1分で価格上昇中、かつ高値圏でない
+            uptrend = (
+                surge_signal in ("SURGE_STRONG", "SURGE_CANDIDATE")
+                and price_change_1m > 0
+                and near_day_high < 0.99
             )
-            return "TAKE_PROFIT_TRAIL"
 
-        # ② RCI 過買い判定（yfinance 失敗時は強制利確）
-        rci_overbought, rci_detail = check_rci_overbought(symbol)
-        if rci_overbought:
-            log.info("RCI利確: %s %+.2f%% — %s", symbol, pnl_pct, rci_detail)
-            return "TAKE_PROFIT"
+            if uptrend:
+                self._claude_decisions[symbol] = "HOLD"
+                self._claude_reasons[symbol] = (
+                    f"上昇継続 ({surge_signal}, 1m:{price_change_1m:+.2f}%)"
+                )
+                log.info("キープ判断: %s 上昇基調継続 → HOLD (%s)", symbol, surge_signal)
+                continue
 
-        # キープ
-        log.info(
-            "キープゾーン: %s 損益率 %+.2f%% 高値%.0f — %s",
-            symbol, pnl_pct, peak, rci_detail,
-        )
-        return None
+            # モメンタム低下 → Claude に最終判断を委ねる
+            entry   = pos["entry_price"]
+            current = self.get_current_price(symbol)
+            if current is None:
+                continue
+
+            peak         = self._peak_prices.get(symbol, current)
+            pnl_pct      = (current - entry) / entry * 100
+            peak_pnl_pct = (peak    - entry) / entry * 100
+            held_min = (
+                datetime.now() - datetime.fromisoformat(pos["opened_at"])
+            ).total_seconds() / 60
+
+            action, reason = claude_tp_advisor.advise(
+                symbol=symbol,
+                name=pos.get("symbol_name") or "",
+                entry_price=entry,
+                current_price=current,
+                pnl_pct=pnl_pct,
+                peak_pnl_pct=peak_pnl_pct,
+                held_minutes=held_min,
+                surge_data=surge_data,
+            )
+            self._claude_decisions[symbol] = action
+            self._claude_reasons[symbol]   = reason
+            log.info(
+                "キープ判断: %s モメンタム低下 → Claude: %s (%s)",
+                symbol, action, reason,
+            )
 
     def force_close_all(self, order_manager) -> list[dict]:
         """強制クローズ: 全 OPEN ポジションに売り注文を発行する。"""
@@ -249,6 +222,8 @@ class PositionTracker:
             db.close_position(symbol, current, "TIME_LIMIT", pnl, pnl_pct)
             self._peak_prices.pop(symbol, None)
             self._keep_zone.discard(symbol)
+            self._claude_decisions.pop(symbol, None)
+            self._claude_reasons.pop(symbol, None)
             closed.append({**pos, "close_price": current, "pnl": pnl, "pnl_pct": pnl_pct})
             log.info("強制クローズ: %s %.0f円 損益 %+.0f円", symbol, current, pnl)
 

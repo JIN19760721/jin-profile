@@ -202,6 +202,7 @@ class TradeEngine:
                 self._tick_positions()
                 tick_count += 1
                 if tick_count % ticks_per_scan == 0:
+                    self._pt.refresh_claude_judgments()
                     self._tick_entries()
                 time.sleep(POSITION_CHECK_INTERVAL_SEC)
         except KeyboardInterrupt:
