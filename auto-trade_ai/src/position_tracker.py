@@ -30,9 +30,11 @@ from src.config import (
     STOP_LOSS_PCT,
     STOP_LOSS_PCT_B,
     STOP_LOSS_PCT_C,
+    STOP_LOSS_PCT_D,
     TAKE_PROFIT_PCT,
     TAKE_PROFIT_PCT_B,
     TAKE_PROFIT_PCT_C,
+    TAKE_PROFIT_PCT_D,
     TAKE_PROFIT_TRAILING_PCT,
 )
 from src.entry_policy import check_rci_overbought
@@ -71,7 +73,10 @@ class PositionTracker:
             symbol = pos["symbol"]
             entry  = pos["entry_price"]
             path   = pos.get("entry_path", "A")
-            if path == "C":
+            if path == "D":
+                sl_pct = STOP_LOSS_PCT_D
+                tp_pct = TAKE_PROFIT_PCT_D
+            elif path == "C":
                 sl_pct = STOP_LOSS_PCT_C
                 tp_pct = TAKE_PROFIT_PCT_C
             elif path == "B":
@@ -94,14 +99,13 @@ class PositionTracker:
             peak_pnl_pct = (peak - entry) / entry * 100
 
             # ── キープゾーン到達判定（経路A/Bのみ。一度到達したら維持する）──
-            if path != "C" and pnl_pct >= tp_pct:
+            # 経路C/D: キープゾーンなし（tp_pct到達で即利確）
+            if path not in ("C", "D") and pnl_pct >= tp_pct:
                 self._keep_zone.add(symbol)
 
             # ── 利益ロック床の算出（経路A/Bのみ、tp_pct未到達の間だけ機能）──
-            # tp_pct到達後はキープゾーン側のトレーリング/RCIに一任するため
-            # floor_pctは通常の損切りラインに戻す（二重の決済ロジックが競合しないように）。
             floor_pct = sl_pct
-            if path != "C" and peak_pnl_pct < tp_pct:
+            if path not in ("C", "D") and peak_pnl_pct < tp_pct:
                 if peak_pnl_pct >= tp_pct * PROFIT_LOCK_PARTIAL_TRIGGER_RATIO:
                     floor_pct = max(floor_pct, peak_pnl_pct - PROFIT_LOCK_PARTIAL_TRAIL_PCT)
                 elif peak_pnl_pct >= tp_pct * PROFIT_LOCK_BREAKEVEN_TRIGGER_RATIO:
@@ -112,9 +116,9 @@ class PositionTracker:
                 reason = "STOP_LOSS" if floor_pct <= sl_pct else "TAKE_PROFIT_LOCK"
 
             # ── 利確判定 ─────────────────────────────────────────────
-            elif path == "C":
+            elif path in ("C", "D"):
                 if pnl_pct >= tp_pct:
-                    reason = "TAKE_PROFIT"  # 経路C: キープゾーンなしで即利確
+                    reason = "TAKE_PROFIT"  # 経路C/D: キープゾーンなしで即利確
                 else:
                     log.debug("監視中: %s 損益率 %+.2f%%", symbol, pnl_pct)
                     continue

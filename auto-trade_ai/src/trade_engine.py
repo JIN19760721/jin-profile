@@ -26,6 +26,9 @@ from src.config import (
     ORDER_QTY,
     PATHC_ENABLED,
     PATHC_MIN_SURGE,
+    PATHD_ENABLED,
+    PATHD_MIN_VOLUME_SPIKE,
+    PATHD_CONFIRM_MIN,
     POLLING_INTERVAL,
     POSITION_CHECK_INTERVAL_SEC,
     PRE_MARKET_LLM_ENABLED,
@@ -158,8 +161,10 @@ class TradeEngine:
         self._shutdown_done = False
         # surge_score 用: symbol → (avg_volume_20d, avg_turnover_20d)
         self._hist_cache: dict[str, tuple[float, float]] = {}
-        # surge 連続確認: symbol → 閾値超え連続回数
+        # surge 連続確認: symbol → 閾値超え連続回数（経路A/B/C: SURGE_CANDIDATE/STRONG）
         self._surge_confirm: dict[str, int] = {}
+        # 出来高先行確認: symbol → PRE_SURGE_SETUP 連続回数（経路D）
+        self._pre_surge_confirm: dict[str, int] = {}
         # surge 通知済みシグナル: symbol → 最後に通知したシグナル（遷移検知用）
         self._surge_notified_signal: dict[str, str] = {}
         # エントリー直前通知済みセット（同一銘柄の重複通知防止）
@@ -441,10 +446,24 @@ class TradeEngine:
                     and (c.get("surge_confirm_count") or 0) >= SURGE_CONFIRM_MIN
                 ]
                 path_c_symbols = {c.get("symbol") for c in path_c}
-            entry_candidates = path_a + path_b + path_c
+            # 経路D: 出来高先行エントリー — PRE_SURGE_SETUP（価格未動・上がる前に入る）
+            path_d: list[dict] = []
+            path_d_symbols: set[str] = set()
+            if PATHD_ENABLED:
+                path_abc_symbols = path_a_symbols | path_b_symbols | path_c_symbols
+                path_d = [
+                    c for c in price_filtered
+                    if c.get("symbol") not in path_abc_symbols
+                    and c.get("surge_signal") == "PRE_SURGE_SETUP"
+                    and (c.get("volume_spike_ratio") or 0) >= PATHD_MIN_VOLUME_SPIKE
+                    and (c.get("pre_surge_confirm_count") or 0) >= PATHD_CONFIRM_MIN
+                ]
+                path_d_symbols = {c.get("symbol") for c in path_d}
+
+            entry_candidates = path_a + path_b + path_c + path_d
             log.info(
-                "エントリー候補: 経路A=%d件 / 経路B=%d件 / 経路C=%d件 → 合計%d件 (confirm>=%d)",
-                len(path_a), len(path_b), len(path_c), len(entry_candidates), SURGE_CONFIRM_MIN,
+                "エントリー候補: 経路A=%d件 / 経路B=%d件 / 経路C=%d件 / 経路D=%d件 → 合計%d件",
+                len(path_a), len(path_b), len(path_c), len(path_d), len(entry_candidates),
             )
         else:
             entry_candidates = [
@@ -498,7 +517,9 @@ class TradeEngine:
             price      = c.get("current_price") or 0
             # リアルタイム板価格を優先（surge評価時にセット済み）
             board_price = c.get("board_price") or price
-            if symbol in path_c_symbols:
+            if symbol in path_d_symbols:
+                entry_path = "D"
+            elif symbol in path_c_symbols:
                 entry_path = "C"
             elif symbol in path_b_symbols:
                 entry_path = "B"
@@ -722,6 +743,13 @@ class TradeEngine:
             else:
                 self._surge_confirm[symbol] = 0
             c["surge_confirm_count"] = self._surge_confirm.get(symbol, 0)
+
+            # 経路D: PRE_SURGE_SETUP 連続確認カウント
+            if result.surge_signal == "PRE_SURGE_SETUP":
+                self._pre_surge_confirm[symbol] = self._pre_surge_confirm.get(symbol, 0) + 1
+            else:
+                self._pre_surge_confirm[symbol] = 0
+            c["pre_surge_confirm_count"] = self._pre_surge_confirm.get(symbol, 0)
 
             log.info(
                 "[SURGE] %s %s: %.0f (%s) confirm=%d vol=%.1fx to=%.1fx 1m=%+.2f%% 5m=%+.2f%%",

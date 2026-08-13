@@ -133,6 +133,10 @@ SURGE_HIST_DAYS: int          = int(_S.get("surge_hist_days", 20))
 # 経路B: surge主導バイパス条件
 SURGE_BYPASS_MIN_SURGE: float = float(_S.get("bypass_min_surge", 85.0))
 SURGE_BYPASS_MIN_SCORE: float = float(_S.get("bypass_min_score", 40.0))
+# 経路D: 出来高先行エントリー（PRE_SURGE_SETUP）
+PATHD_ENABLED: bool           = bool(_S.get("pathd_enabled", True))
+PATHD_MIN_VOLUME_SPIKE: float = float(_S.get("pathd_min_volume_spike", 2.5))
+PATHD_CONFIRM_MIN: int        = int(_S.get("pathd_confirm_min", 2))
 # 発注価格バッファ（急騰中の未約定防止）
 ORDER_PRICE_BUFFER_PCT: float = float(_S.get("order_price_buffer_pct", 0.3))
 # 経路C: score不問のsurge純粋選出
@@ -146,6 +150,9 @@ STOP_LOSS_PCT_B: float        = float(_T.get("stop_loss_pct_b",  -2.0))
 TAKE_PROFIT_PCT_B: float      = float(_T.get("take_profit_pct_b",  5.0))
 STOP_LOSS_PCT_C: float        = float(_T.get("stop_loss_pct_c",  -1.5))
 TAKE_PROFIT_PCT_C: float      = float(_T.get("take_profit_pct_c",  3.0))
+# 経路D: 出来高蓄積主導（PRE_SURGE_SETUP）— 価格が動く前にエントリーして急騰を待つ
+STOP_LOSS_PCT_D: float        = float(_T.get("stop_loss_pct_d",  -2.0))
+TAKE_PROFIT_PCT_D: float      = float(_T.get("take_profit_pct_d",  5.0))
 
 # ── リアルタイムモニター ─────────────────────────────────────────────────────
 _M = _SETTINGS.get("monitor", {})
