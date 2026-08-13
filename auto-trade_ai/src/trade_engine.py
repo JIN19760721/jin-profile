@@ -38,6 +38,8 @@ from src.config import (
     SURGE_HIST_DAYS,
     SURGE_NOTIFY_DELTA,
     SURGE_NOTIFY_ENABLED,
+    SURGE_NOTIFY_ON_TRANSITION_ONLY,
+    PRE_ENTRY_NOTIFY_ENABLED,
     TRADE_EXCHANGE,
     TRADING_SESSIONS,
     USE_SURGE_SCORE_FILTER,
@@ -158,6 +160,8 @@ class TradeEngine:
         self._hist_cache: dict[str, tuple[float, float]] = {}
         # surge 連続確認: symbol → 閾値超え連続回数
         self._surge_confirm: dict[str, int] = {}
+        # surge 通知済みシグナル: symbol → 最後に通知したシグナル（遷移検知用）
+        self._surge_notified_signal: dict[str, str] = {}
         # エントリー直前通知済みセット（同一銘柄の重複通知防止）
         self._pre_entry_notified: set[str] = set()
         db.init_db(DB_PATH)
@@ -449,7 +453,7 @@ class TradeEngine:
             ]
 
         # ⑤-b エントリー直前アラート（confirm_min-1 回目に達した銘柄を通知）
-        if SURGE_CONFIRM_MIN >= 2:
+        if PRE_ENTRY_NOTIFY_ENABLED and SURGE_CONFIRM_MIN >= 2:
             for c in price_filtered:
                 sym     = c.get("symbol") or ""
                 confirm = c.get("surge_confirm_count") or 0
@@ -728,10 +732,24 @@ class TradeEngine:
             )
 
             # LINE 通知: surge_notify_enabled=true かつ条件を満たす場合のみ送信
-            should_notify = SURGE_NOTIFY_ENABLED and (
-                result.surge_signal in ("SURGE_CANDIDATE", "SURGE_STRONG")
-                or result.surge_score_delta >= SURGE_NOTIFY_DELTA
-            )
+            prev_signal = self._surge_notified_signal.get(symbol, "")
+            if SURGE_NOTIFY_ON_TRANSITION_ONLY:
+                # シグナルが上位ステータスに遷移したときのみ通知（維持中はdeltaのみ）
+                _SIGNAL_RANK = {"": 0, "NO_SURGE": 0, "SURGE_WATCH": 1, "SURGE_CANDIDATE": 2, "SURGE_STRONG": 3}
+                signal_upgraded = _SIGNAL_RANK.get(result.surge_signal, 0) > _SIGNAL_RANK.get(prev_signal, 0)
+                should_notify = SURGE_NOTIFY_ENABLED and (
+                    signal_upgraded
+                    or result.surge_score_delta >= SURGE_NOTIFY_DELTA
+                )
+            else:
+                should_notify = SURGE_NOTIFY_ENABLED and (
+                    result.surge_signal in ("SURGE_CANDIDATE", "SURGE_STRONG")
+                    or result.surge_score_delta >= SURGE_NOTIFY_DELTA
+                )
+            if result.surge_signal in ("NO_SURGE", ""):
+                self._surge_notified_signal.pop(symbol, None)
+            elif should_notify:
+                self._surge_notified_signal[symbol] = result.surge_signal
             if should_notify:
                 notifier.notify_surge_candidate(
                     symbol=symbol,

@@ -125,6 +125,10 @@ SURGE_CANDIDATE_SCORE: float  = float(_S.get("surge_candidate_score", 70.0))
 SURGE_WATCH_SCORE: float      = float(_S.get("surge_watch_score", 50.0))
 SURGE_NOTIFY_DELTA: float     = float(_S.get("surge_notify_delta", 10.0))
 SURGE_NOTIFY_ENABLED: bool    = bool(_S.get("surge_notify_enabled", True))
+# 急騰候補通知: シグナルが上位ステータスに遷移したときのみ通知する（維持中はdeltaのみ）
+SURGE_NOTIFY_ON_TRANSITION_ONLY: bool = bool(_S.get("surge_notify_on_transition_only", True))
+# エントリー直前アラート通知（confirm_min-1 回目に達した銘柄）
+PRE_ENTRY_NOTIFY_ENABLED: bool = bool(_S.get("pre_entry_notify_enabled", False))
 SURGE_HIST_DAYS: int          = int(_S.get("surge_hist_days", 20))
 # 経路B: surge主導バイパス条件
 SURGE_BYPASS_MIN_SURGE: float = float(_S.get("bypass_min_surge", 85.0))
