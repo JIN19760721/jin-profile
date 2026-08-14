@@ -550,6 +550,14 @@ class TradeEngine:
             time.monotonic() - _hist_start, len(candidates),
         )
 
+        # kabu STATION は /board 取得のたびに銘柄を内部レジストし、上限50銘柄を超えると
+        # 新規銘柄の取得が「レジスト数エラー」(Code 4002006) で失敗する。経路Dは評価対象銘柄が
+        # tickごとに入れ替わるため、事前にレジストを解除して上限到達を防ぐ。
+        try:
+            self._client.put("/unregister/all", body={})
+        except Exception as e:
+            log.warning("PUT /unregister/all 失敗: %s", e)
+
         board_fail_count = 0
 
         for c in candidates:
