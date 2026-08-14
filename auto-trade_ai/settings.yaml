@@ -7,7 +7,7 @@ trade:
   take_profit_trailing_pct: 3.0    # キープゾーン中に高値からこれだけ押したら強制利確
   # 利益ロック（take_profit_pct_d到達前の無防備地帯対策）
   # 高値時点の含み益が take_profit_pct_d * trigger_ratio に達したら防御ラインを引き上げる
-  profit_lock_breakeven_trigger_ratio: 0.25  # ブレークイーブン確保の発動比率
+  profit_lock_breakeven_trigger_ratio: 0.40  # ブレークイーブン確保の発動比率
   profit_lock_breakeven_floor_pct: 0.5       # ブレークイーブン確保時の下限（%）
   profit_lock_partial_trigger_ratio: 0.5     # 部分トレーリング開始の発動比率
   profit_lock_partial_trail_pct: 2.0         # 部分トレーリングの許容押し幅（高値からのpt）
