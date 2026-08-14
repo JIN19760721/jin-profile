@@ -1,10 +1,14 @@
 """
 ウォッチリスト銘柄の買い時・売り時アドバイス（--advise）。
 
-kabuステーションAPIには一切依存しない。yfinanceの当日分足・日足から
-技術的なスナップショット（現在値・当日高安・VWAP概算・RCI・移動平均）を作り、
-TDnetの適時開示（tdnet_fetcher.py流用）と合わせてClaudeに渡し、
-未保有銘柄は「買い時」、保有銘柄は取得単価・含み損益を踏まえた「売り時」を
+寄り付き前・取引時間外はyfinanceの日足・分足のみで動作する（kabu STATION不要）。
+取引時間中はkabu STATIONの板情報から現在値・当日高安・VWAPをリアルタイムで取得し、
+yfinance分足特有の遅延（東証銘柄は15〜20分程度）を回避する。kabu認証に失敗した
+場合はyfinanceのみにフェイルオープンする。RCIはkabu STATIONに過去分足取得APIが
+ないため、取引時間中もyfinance分足に依存する（取得できなければnull扱い）。
+
+技術的なスナップショットをTDnetの適時開示（tdnet_fetcher.py流用）と合わせてClaudeに
+渡し、未保有銘柄は「買い時」、保有銘柄は取得単価・含み損益を踏まえた「売り時」を
 助言させる。発注は一切行わない（あくまで助言のみ、実行はユーザー判断）。
 
 失敗時（データ取得・API呼び出し）はフェイルオープンでその銘柄／全体をスキップする。
@@ -14,14 +18,18 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 
 import yfinance as yf
 from pydantic import BaseModel
 
 from src import db, entry_policy, notifier, tdnet_fetcher
-from src.config import ANTHROPIC_API_KEY, RCI_PERIOD, WATCH_ADVISOR_MODEL
+from src.config import ANTHROPIC_API_KEY, RCI_PERIOD, TRADING_SESSIONS, WATCH_ADVISOR_MODEL
+from src.kabu_client import KabuClient
 
 log = logging.getLogger(__name__)
+
+EXCHANGE_CODE = 1
 
 
 class _Advice(BaseModel):
@@ -78,17 +86,54 @@ def _yf_symbol(symbol: str) -> str:
     return f"{symbol}.T"
 
 
-def _fetch_technical_snapshot(symbol: str) -> dict | None:
-    """当日分足＋日足から技術的スナップショットを作る。取得失敗時は None。"""
-    try:
-        intraday = yf.download(
-            _yf_symbol(symbol), interval="1m", period="1d",
-            progress=False, auto_adjust=True, multi_level_index=False,
-        )
-    except Exception as e:
-        log.warning("%s: 分足取得失敗: %s", symbol, e)
-        intraday = None
+def _parse_hhmm(s: str) -> tuple[int, int]:
+    h, m = s.split(":")
+    return int(h), int(m)
 
+
+def _is_in_trading_session() -> bool:
+    now_min = datetime.now().hour * 60 + datetime.now().minute
+    for s in TRADING_SESSIONS:
+        h1, m1 = _parse_hhmm(s["start"])
+        h2, m2 = _parse_hhmm(s["end"])
+        if h1 * 60 + m1 <= now_min <= h2 * 60 + m2:
+            return True
+    return False
+
+
+def _round_or_none(v) -> float | None:
+    return round(float(v), 1) if v else None
+
+
+def _fetch_kabu_board_snapshot(symbol: str, client: KabuClient) -> dict | None:
+    """kabu STATIONの板情報からリアルタイムスナップショットを作る。取得失敗時は None。"""
+    try:
+        board = client.get(f"/board/{symbol}@{EXCHANGE_CODE}")
+    except Exception as e:
+        log.warning("%s: kabu board取得失敗 → yfinanceにフォールバック: %s", symbol, e)
+        return None
+
+    cur = board.get("CurrentPrice") or board.get("BestAsk1")
+    if not cur:
+        log.warning("%s: kabu board応答にCurrentPriceがありません → yfinanceにフォールバック", symbol)
+        return None
+
+    return {
+        "current_price": round(float(cur), 1),
+        "day_open": _round_or_none(board.get("OpeningPrice") or board.get("DayOpen")),
+        "day_high": _round_or_none(board.get("HighPrice") or board.get("DayHigh")),
+        "day_low":  _round_or_none(board.get("LowPrice") or board.get("DayLow")),
+        "vwap":     _round_or_none(board.get("VWAP") or board.get("Vwap")),
+    }
+
+
+def _fetch_technical_snapshot(symbol: str, client: KabuClient | None = None) -> dict | None:
+    """技術的スナップショットを作る。取得失敗時は None。
+
+    現在値・当日高安・VWAPは、取引時間中でclientが渡されていればkabu STATIONの
+    リアルタイム板情報を優先する（失敗時はyfinance分足にフォールバック）。
+    RCI・日足移動平均はkabu STATIONに過去データ取得APIがないため常にyfinanceを使う。
+    """
     try:
         daily = yf.download(
             _yf_symbol(symbol), interval="1d", period="30d",
@@ -105,6 +150,33 @@ def _fetch_technical_snapshot(symbol: str) -> dict | None:
     prev_close = float(daily["Close"].iloc[-1])
     ma5_daily  = float(daily["Close"].rolling(5).mean().iloc[-1]) if len(daily) >= 5 else None
     ma20_daily = float(daily["Close"].rolling(20).mean().iloc[-1]) if len(daily) >= 20 else None
+    ma5_daily  = round(ma5_daily, 1)  if ma5_daily  is not None else None
+    ma20_daily = round(ma20_daily, 1) if ma20_daily is not None else None
+
+    try:
+        intraday = yf.download(
+            _yf_symbol(symbol), interval="1m", period="1d",
+            progress=False, auto_adjust=True, multi_level_index=False,
+        )
+    except Exception as e:
+        log.warning("%s: 分足取得失敗: %s", symbol, e)
+        intraday = None
+
+    rci = None
+    if intraday is not None and not intraday.empty:
+        closes = intraday["Close"].dropna().tolist()
+        rci = entry_policy._calc_rci(closes, RCI_PERIOD) if len(closes) >= RCI_PERIOD else None
+
+    kabu_snap = _fetch_kabu_board_snapshot(symbol, client) if client is not None else None
+    if kabu_snap is not None:
+        return {
+            "market_status": "live",
+            **kabu_snap,
+            "prev_close": round(prev_close, 1),
+            "rci":        rci,
+            "ma5_daily":  ma5_daily,
+            "ma20_daily": ma20_daily,
+        }
 
     if intraday is None or intraday.empty:
         # 寄り付き前・取引時間外で当日分足がまだ無い場合は前日終値ベースの参考情報のみ返す
@@ -112,8 +184,8 @@ def _fetch_technical_snapshot(symbol: str) -> dict | None:
             "market_status": "closed_or_pre_market",
             "current_price": round(prev_close, 1),
             "prev_close":    round(prev_close, 1),
-            "ma5_daily":     round(ma5_daily, 1) if ma5_daily is not None else None,
-            "ma20_daily":    round(ma20_daily, 1) if ma20_daily is not None else None,
+            "ma5_daily":     ma5_daily,
+            "ma20_daily":    ma20_daily,
         }
 
     closes  = intraday["Close"].dropna().tolist()
@@ -126,8 +198,6 @@ def _fetch_technical_snapshot(symbol: str) -> dict | None:
     vol_sum = float(intraday["Volume"].sum())
     vwap = float((typical * intraday["Volume"]).sum() / vol_sum) if vol_sum > 0 else None
 
-    rci = entry_policy._calc_rci(closes, RCI_PERIOD) if len(closes) >= RCI_PERIOD else None
-
     return {
         "market_status": "live",
         "current_price": round(current_price, 1),
@@ -137,8 +207,8 @@ def _fetch_technical_snapshot(symbol: str) -> dict | None:
         "day_low":       round(day_low, 1),
         "vwap":          round(vwap, 1) if vwap is not None else None,
         "rci":           rci,
-        "ma5_daily":     round(ma5_daily, 1) if ma5_daily is not None else None,
-        "ma20_daily":    round(ma20_daily, 1) if ma20_daily is not None else None,
+        "ma5_daily":     ma5_daily,
+        "ma20_daily":    ma20_daily,
     }
 
 
@@ -204,13 +274,22 @@ def run(model: str = WATCH_ADVISOR_MODEL) -> list[dict]:
         log.warning("ウォッチリストが空です。--watch-add で銘柄を登録してください。")
         return []
 
+    client = None
+    if _is_in_trading_session():
+        try:
+            client = KabuClient()
+            client.authenticate()
+        except Exception as e:
+            log.warning("kabu STATION認証に失敗 → yfinanceのみで継続します: %s", e)
+            client = None
+
     symbols = [w["symbol"] for w in watchlist]
     disclosures_by_symbol = _fetch_disclosures_for_symbols(symbols)
 
     summaries: list[dict] = []
     for w in watchlist:
         symbol = w["symbol"]
-        snap = _fetch_technical_snapshot(symbol)
+        snap = _fetch_technical_snapshot(symbol, client)
         if snap is None:
             continue
         summary = {"symbol": symbol, "held": bool(w["held"]), **snap}
