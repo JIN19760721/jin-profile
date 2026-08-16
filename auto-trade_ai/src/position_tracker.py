@@ -51,6 +51,30 @@ class PositionTracker:
         self._claude_reasons:   dict[str, str] = {}   # symbol → 理由文字列
         # check_all() で取得した直近価格（同一tickでの board API 二重呼び出しを防ぐ）
         self._last_price: dict[str, float] = {}
+        self._restore_state_from_db()
+
+    def _restore_state_from_db(self) -> None:
+        """再起動時、DBに永続化されたmax_pnl_pctから高値・キープゾーン状態を復元する。
+
+        _peak_prices/_keep_zoneはプロセス内メモリのみで管理しているため、再起動すると
+        失われ、利確ラインを一度超えた後のポジションの保護が弱まる問題があった。
+        _claude_decisions/_claude_reasonsはデフォルトのHOLD（安全側）で始まり
+        次のrefresh_claude_judgments()サイクルで再計算されるため復元不要。
+        """
+        for pos in db.get_open_positions(dry_run=self.dry_run):
+            symbol = pos["symbol"]
+            max_pnl_pct = pos.get("max_pnl_pct")
+            if max_pnl_pct is None:
+                continue
+            entry = pos["entry_price"]
+            peak_price = entry * (1 + max_pnl_pct / 100)
+            self._peak_prices[symbol] = peak_price
+            if max_pnl_pct >= TAKE_PROFIT_PCT_D:
+                self._keep_zone.add(symbol)
+            log.info(
+                "状態復元: %s 高値%.0f円(過去最大含み益%+.2f%%) keep_zone=%s",
+                symbol, peak_price, max_pnl_pct, symbol in self._keep_zone,
+            )
 
     def get_current_price(self, symbol: str) -> float | None:
         """/board から現在値を取得する。"""
