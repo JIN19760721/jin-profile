@@ -325,6 +325,8 @@ class TradeEngine:
                     pos["close_price"], pos.get("pnl", 0.0), "TIME_LIMIT",
                     dry_run=self.dry_run,
                 )
+            if not self.dry_run:
+                self._wait_for_closing_confirmation()
             self._on_shutdown()
             raise SystemExit(0)
 
@@ -339,12 +341,54 @@ class TradeEngine:
 
         # ③ PENDING 注文確認
         filled_list = self._om.check_pending_orders()
+        self._notify_filled_orders(filled_list)
+
+    def _notify_filled_orders(self, filled_list: list[dict]) -> None:
+        """check_pending_orders() の結果を通知する。
+
+        SELL約定でCLOSING中ポジションが確定した場合はnotify_closed（損益つき）、
+        それ以外（BUY約定 or 未確定の一部約定）はnotify_filledで通知する。
+        """
         for order in filled_list:
-            notifier.notify_filled(
-                order["symbol"], order.get("symbol_name", ""),
-                order["filled_price"], order["qty"],
-                dry_run=self.dry_run,
+            if order.get("close_reason") is not None:
+                notifier.notify_closed(
+                    order["symbol"], order.get("symbol_name", ""),
+                    order["close_price"], order.get("pnl", 0.0), order["close_reason"],
+                    dry_run=self.dry_run,
+                )
+            else:
+                notifier.notify_filled(
+                    order["symbol"], order.get("symbol_name", ""),
+                    order["filled_price"], order["qty"],
+                    dry_run=self.dry_run,
+                )
+
+    def _wait_for_closing_confirmation(
+        self, timeout_min: float = 10.0, poll_sec: float = 10.0,
+    ) -> None:
+        """強制クローズ後、全CLOSINGポジションの約定確定を一定時間待つ（本番のみ）。
+
+        タイムアウトしても手動確認が必要な旨をログ・通知したうえで終了する
+        （エンジンを無期限に動かし続けるわけにはいかないため）。
+        """
+        deadline = time.monotonic() + timeout_min * 60
+        while time.monotonic() < deadline:
+            still_closing = db.get_closing_positions(dry_run=self.dry_run)
+            if not still_closing:
+                log.info("全ポジションの決済が確定しました。")
+                return
+            filled_list = self._om.check_pending_orders()
+            self._notify_filled_orders(filled_list)
+            time.sleep(poll_sec)
+
+        remaining = db.get_closing_positions(dry_run=self.dry_run)
+        if remaining:
+            symbols = ", ".join(p["symbol"] for p in remaining)
+            log.error(
+                "強制クローズの約定確認がタイムアウトしました。実口座を手動確認してください: %s",
+                symbols,
             )
+            notifier.send(f"[要確認] 強制クローズ未確定: {symbols}", dry_run=self.dry_run)
 
     def _tick_entries(self) -> None:
         """低頻度ループ（POLLING_INTERVAL 間隔）: 新規エントリー探索（取引セッション内・様子見期間外のみ）。"""
@@ -710,7 +754,7 @@ class TradeEngine:
         self._shutdown_done = True
         try:
             closed    = db.get_today_closed_positions(dry_run=self.dry_run)
-            open_pos  = db.get_open_positions(dry_run=self.dry_run)
+            open_pos  = db.get_open_positions(dry_run=self.dry_run, include_closing=True)
             today_pnl = db.get_today_closed_pnl(dry_run=self.dry_run)
             cand_count = len(db.get_daily_candidates())
 
@@ -718,7 +762,11 @@ class TradeEngine:
             wins  = sum(1 for p in closed if (p.get("pnl") or 0) >= 0)
 
             if open_pos:
-                log.warning("未決済ポジション %d 件が残っています。", len(open_pos))
+                closing_count = sum(1 for p in open_pos if p["status"] == "CLOSING")
+                log.warning(
+                    "未決済ポジション %d 件が残っています（うち約定確認待ち %d 件）。",
+                    len(open_pos), closing_count,
+                )
 
             db.upsert_daily_summary(total, wins, total - wins, today_pnl)
             notifier.notify_daily_report(closed, open_pos, cand_count, dry_run=self.dry_run)

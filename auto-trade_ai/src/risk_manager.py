@@ -38,7 +38,7 @@ class RiskManager:
         実効資金 = 初期資金 + max(0, 累積損益)  ← 利益分を翌日以降も引き継ぐ
         利用可能  = 実効資金 - 保有中ポジションの取得コスト
         """
-        open_positions = db.get_open_positions(dry_run=self.dry_run)
+        open_positions = db.get_open_positions(dry_run=self.dry_run, include_closing=True)
         open_cost = sum(p["entry_price"] * p["qty"] for p in open_positions)
         cumulative_pnl = db.get_cumulative_pnl(dry_run=self.dry_run)
         effective_capital = CAPITAL + max(0.0, cumulative_pnl)
@@ -66,8 +66,8 @@ class RiskManager:
         if db.has_open_position(symbol, dry_run=self.dry_run):
             return False, f"{symbol} は既に保有中"
 
-        # ③ 最大保有数
-        open_count = len(db.get_open_positions(dry_run=self.dry_run))
+        # ③ 最大保有数（売り約定確認待ちのCLOSING中も実質保有しているため含める）
+        open_count = len(db.get_open_positions(dry_run=self.dry_run, include_closing=True))
         if open_count >= MAX_POSITIONS:
             return False, f"最大保有数 {MAX_POSITIONS} 銘柄に達しています"
 

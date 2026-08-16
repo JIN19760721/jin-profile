@@ -56,7 +56,10 @@ def init_db(db_path: Path = DB_PATH) -> None:
             entry_surge_score         REAL,
             entry_surge_signal        TEXT,
             entry_surge_confirm_count INTEGER,
-            entry_reasons             TEXT
+            entry_reasons             TEXT,
+            closing_order_id     TEXT,
+            closing_filled_qty   INTEGER DEFAULT 0,
+            closing_filled_value REAL    DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS daily_summary (
@@ -155,6 +158,12 @@ _ENTRY_SIGNAL_COLUMNS = [
     ("entry_reasons",             "TEXT"),
 ]
 
+_CLOSING_COLUMNS = [
+    ("closing_order_id",     "TEXT", "NULL"),
+    ("closing_filled_qty",   "INTEGER", "0"),
+    ("closing_filled_value", "REAL", "0"),
+]
+
 
 def _migrate_orders(conn: sqlite3.Connection) -> None:
     existing = {row[1] for row in conn.execute("PRAGMA table_info(orders)")}
@@ -174,6 +183,9 @@ def _migrate_positions(conn: sqlite3.Connection) -> None:
     for col, typ in _ENTRY_SIGNAL_COLUMNS:
         if col not in existing:
             conn.execute(f"ALTER TABLE positions ADD COLUMN {col} {typ}")
+    for col, typ, default in _CLOSING_COLUMNS:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE positions ADD COLUMN {col} {typ} DEFAULT {default}")
 
 
 def _migrate_positions_drop_symbol_unique(conn: sqlite3.Connection) -> None:
@@ -214,7 +226,10 @@ def _migrate_positions_drop_symbol_unique(conn: sqlite3.Connection) -> None:
             entry_surge_score         REAL,
             entry_surge_signal        TEXT,
             entry_surge_confirm_count INTEGER,
-            entry_reasons             TEXT
+            entry_reasons             TEXT,
+            closing_order_id     TEXT,
+            closing_filled_qty   INTEGER DEFAULT 0,
+            closing_filled_value REAL    DEFAULT 0
         );
 
         INSERT INTO positions (
@@ -222,14 +237,16 @@ def _migrate_positions_drop_symbol_unique(conn: sqlite3.Connection) -> None:
             status, opened_at, closed_at, close_price, close_reason,
             pnl, pnl_pct, dry_run, entry_path, max_pnl_pct,
             entry_score, entry_surge_score, entry_surge_signal,
-            entry_surge_confirm_count, entry_reasons
+            entry_surge_confirm_count, entry_reasons,
+            closing_order_id, closing_filled_qty, closing_filled_value
         )
         SELECT
             id, symbol, symbol_name, qty, entry_price, entry_order_id,
             status, opened_at, closed_at, close_price, close_reason,
             pnl, pnl_pct, dry_run, entry_path, max_pnl_pct,
             entry_score, entry_surge_score, entry_surge_signal,
-            entry_surge_confirm_count, entry_reasons
+            entry_surge_confirm_count, entry_reasons,
+            closing_order_id, closing_filled_qty, closing_filled_value
         FROM positions_pre_migration;
 
         DROP TABLE positions_pre_migration;
@@ -358,13 +375,111 @@ def insert_position(
         )
 
 
-def get_open_positions(dry_run: bool = False, db_path: Path = DB_PATH) -> list[dict]:
+def get_open_positions(
+    dry_run: bool = False,
+    include_closing: bool = False,
+    db_path: Path = DB_PATH,
+) -> list[dict]:
+    """OPENポジションを返す。include_closing=Trueなら売り注文確認待ち(CLOSING)も含める
+    （資金・保有数の判定など、実際にまだ株を保有している間は考慮すべき用途向け）。
+    """
+    status_clause = "status IN ('OPEN','CLOSING')" if include_closing else "status='OPEN'"
     with _connect(db_path) as conn:
         rows = conn.execute(
-            "SELECT * FROM positions WHERE status='OPEN' AND dry_run=?",
+            f"SELECT * FROM positions WHERE {status_clause} AND dry_run=?",
             (int(dry_run),),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_closing_positions(dry_run: bool = False, db_path: Path = DB_PATH) -> list[dict]:
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM positions WHERE status='CLOSING' AND dry_run=?",
+            (int(dry_run),),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_position_closing(
+    symbol: str,
+    order_id: str,
+    reason: str,
+    dry_run: bool = False,
+    db_path: Path = DB_PATH,
+) -> None:
+    """売り注文を発行したがまだ約定未確認のポジションをCLOSING状態にする。
+
+    OPENから除外されるため、次tickで同じポジションに二重で売り注文が
+    飛ぶことも防げる。close_reasonはここで仮登録し、約定確定時にそのまま使う。
+    """
+    with _connect(db_path) as conn:
+        conn.execute(
+            """UPDATE positions
+               SET status='CLOSING', closing_order_id=?, close_reason=?,
+                   closing_filled_qty=0, closing_filled_value=0
+               WHERE symbol=? AND status='OPEN' AND dry_run=?""",
+            (order_id, reason, symbol, int(dry_run)),
+        )
+
+
+def update_closing_order_id(
+    symbol: str,
+    order_id: str,
+    dry_run: bool = False,
+    db_path: Path = DB_PATH,
+) -> None:
+    """タイムアウト後の売り再発注時に、紐付ける注文IDを更新する。"""
+    with _connect(db_path) as conn:
+        conn.execute(
+            "UPDATE positions SET closing_order_id=? WHERE symbol=? AND status='CLOSING' AND dry_run=?",
+            (order_id, symbol, int(dry_run)),
+        )
+
+
+def record_closing_fill(
+    symbol: str,
+    dry_run: bool,
+    filled_qty: int,
+    filled_price: float,
+    db_path: Path = DB_PATH,
+) -> dict | None:
+    """CLOSING中ポジションへの約定（全数 or 部分）を積み上げる。
+
+    積算約定数がポジション数量に達したら加重平均価格でCLOSEDに確定し、
+    確定結果（close_price/pnl/pnl_pct/close_reason等）を返す。
+    未確定（まだ一部しか埋まっていない）場合は None を返す。
+    """
+    with _connect(db_path) as conn:
+        conn.execute(
+            """UPDATE positions
+               SET closing_filled_qty = COALESCE(closing_filled_qty, 0) + ?,
+                   closing_filled_value = COALESCE(closing_filled_value, 0) + ?
+               WHERE symbol=? AND status='CLOSING' AND dry_run=?""",
+            (filled_qty, filled_qty * filled_price, symbol, int(dry_run)),
+        )
+        row = conn.execute(
+            "SELECT * FROM positions WHERE symbol=? AND status='CLOSING' AND dry_run=?",
+            (symbol, int(dry_run)),
+        ).fetchone()
+        if row is None:
+            return None
+        pos = dict(row)
+        if pos["closing_filled_qty"] < pos["qty"]:
+            return None
+
+        avg_price = pos["closing_filled_value"] / pos["closing_filled_qty"]
+        entry     = pos["entry_price"]
+        pnl       = (avg_price - entry) * pos["qty"]
+        pnl_pct   = (avg_price - entry) / entry * 100
+        conn.execute(
+            """UPDATE positions
+               SET status='CLOSED', closed_at=?, close_price=?, pnl=?, pnl_pct=?
+               WHERE symbol=? AND status='CLOSING' AND dry_run=?""",
+            (_now(), avg_price, pnl, pnl_pct, symbol, int(dry_run)),
+        )
+        pos.update(status="CLOSED", closed_at=_now(), close_price=avg_price, pnl=pnl, pnl_pct=pnl_pct)
+        return pos
 
 
 def close_position(
@@ -433,9 +548,14 @@ def get_today_closed_positions(dry_run: bool = False, db_path: Path = DB_PATH) -
 
 
 def has_open_position(symbol: str, dry_run: bool = False, db_path: Path = DB_PATH) -> bool:
+    """OPENまたはCLOSING（売り約定確認待ち）のポジションがあるか。
+
+    CLOSING中も実際にはまだ株を保有しているため、同一銘柄への新規買いを
+    ブロックする対象に含める。
+    """
     with _connect(db_path) as conn:
         row = conn.execute(
-            "SELECT 1 FROM positions WHERE symbol=? AND status='OPEN' AND dry_run=?",
+            "SELECT 1 FROM positions WHERE symbol=? AND status IN ('OPEN','CLOSING') AND dry_run=?",
             (symbol, int(dry_run)),
         ).fetchone()
     return row is not None

@@ -129,21 +129,32 @@ class PositionTracker:
                 "%s: %s 損益率 %+.2f%% 損益 %+.0f円",
                 reason, symbol, pnl_pct, pnl,
             )
-            order_manager.place_sell_order(
+            order_id = order_manager.place_sell_order(
                 symbol, pos.get("symbol_name") or "", current, pos["qty"]
             )
-            db.close_position(symbol, current, reason, pnl, pnl_pct)
+            if order_id is None:
+                log.error("%s: 売り注文発行に失敗しました。OPENのまま維持し次tickで再試行します。", symbol)
+                continue
+
             self._peak_prices.pop(symbol, None)
             self._keep_zone.discard(symbol)
             self._claude_decisions.pop(symbol, None)
             self._claude_reasons.pop(symbol, None)
-            triggered.append({
-                **pos,
-                "close_price":  current,
-                "close_reason": reason,
-                "pnl":          pnl,
-                "pnl_pct":      pnl_pct,
-            })
+
+            if self.dry_run:
+                # DRY-RUNは即仮約定するため従来通り即CLOSEDにする
+                db.close_position(symbol, current, reason, pnl, pnl_pct)
+                triggered.append({
+                    **pos,
+                    "close_price":  current,
+                    "close_reason": reason,
+                    "pnl":          pnl,
+                    "pnl_pct":      pnl_pct,
+                })
+            else:
+                # 本番は約定未確認のためCLOSING状態にし、order_manager.check_pending_orders()
+                # による約定確認後に確定させる（板が薄く売れないケースへの対策）
+                db.mark_position_closing(symbol, order_id, reason, dry_run=False)
 
         return triggered
 
@@ -210,24 +221,38 @@ class PositionTracker:
             )
 
     def force_close_all(self, order_manager) -> list[dict]:
-        """強制クローズ: 全 OPEN ポジションに売り注文を発行する。"""
+        """強制クローズ: 全 OPEN ポジションに売り注文を発行する。
+
+        DRY-RUNは即仮約定するため従来通り即CLOSEDにするが、本番は約定未確認のため
+        CLOSING状態にするだけで、確定は order_manager.check_pending_orders() に委ねる
+        （呼び出し側は約定確認ループを回すこと）。
+        """
         positions = db.get_open_positions(dry_run=self.dry_run)
         closed: list[dict] = []
 
         for pos in positions:
             symbol  = pos["symbol"]
             current = self.get_current_price(symbol) or pos["entry_price"]
-            pnl     = (current - pos["entry_price"]) * pos["qty"]
-            pnl_pct = (current - pos["entry_price"]) / pos["entry_price"] * 100
-            order_manager.place_sell_order(
+            order_id = order_manager.place_sell_order(
                 symbol, pos.get("symbol_name") or "", current, pos["qty"]
             )
-            db.close_position(symbol, current, "TIME_LIMIT", pnl, pnl_pct)
+            if order_id is None:
+                log.error("%s: 強制クローズの売り注文発行に失敗しました。手動確認が必要です。", symbol)
+                continue
+
             self._peak_prices.pop(symbol, None)
             self._keep_zone.discard(symbol)
             self._claude_decisions.pop(symbol, None)
             self._claude_reasons.pop(symbol, None)
-            closed.append({**pos, "close_price": current, "pnl": pnl, "pnl_pct": pnl_pct})
-            log.info("強制クローズ: %s %.0f円 損益 %+.0f円", symbol, current, pnl)
+
+            if self.dry_run:
+                pnl     = (current - pos["entry_price"]) * pos["qty"]
+                pnl_pct = (current - pos["entry_price"]) / pos["entry_price"] * 100
+                db.close_position(symbol, current, "TIME_LIMIT", pnl, pnl_pct)
+                closed.append({**pos, "close_price": current, "pnl": pnl, "pnl_pct": pnl_pct})
+                log.info("強制クローズ: %s %.0f円 損益 %+.0f円", symbol, current, pnl)
+            else:
+                db.mark_position_closing(symbol, order_id, "TIME_LIMIT", dry_run=False)
+                log.info("強制クローズ注文発行: %s @ %.0f円（約定確認待ち）", symbol, current)
 
         return closed
