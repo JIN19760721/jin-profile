@@ -3,7 +3,7 @@ import time
 
 import requests
 
-from src.config import API_PASSWORD, BASE_URL
+from src.config import API_PASSWORD, BASE_URL, KABU_ENV
 
 log = logging.getLogger(__name__)
 
@@ -24,6 +24,9 @@ class KabuClient:
             raise ValueError(
                 "API_PASSWORD が未設定です。.env に API_PASSWORD を設定してください。"
             )
+
+        env_label = "本番" if KABU_ENV == "prod" else "検証"
+        log.info("kabu STATION接続先: %s (%s環境, KABU_ENV=%s)", BASE_URL, env_label, KABU_ENV)
 
         url = f"{BASE_URL}/token"
         try:
