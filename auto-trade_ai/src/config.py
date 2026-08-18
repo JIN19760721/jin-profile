@@ -73,6 +73,10 @@ PROFIT_LOCK_BREAKEVEN_TRIGGER_RATIO: float = float(_T.get("profit_lock_breakeven
 PROFIT_LOCK_BREAKEVEN_FLOOR_PCT: float     = float(_T.get("profit_lock_breakeven_floor_pct", 0.5))
 PROFIT_LOCK_PARTIAL_TRIGGER_RATIO: float   = float(_T.get("profit_lock_partial_trigger_ratio", 0.5))
 PROFIT_LOCK_PARTIAL_TRAIL_PCT: float       = float(_T.get("profit_lock_partial_trail_pct", 2.0))
+# 停滞タイムアウト: 保有stall_timeout_min分経過してもピーク含み益がstall_peak_threshold_pct%に
+# 届かない（出来高急増後に価格が追随しないまま停滞している）場合、損切りラインを待たずに撤退する
+STALL_TIMEOUT_MIN: float          = float(_T.get("stall_timeout_min", 30))
+STALL_PEAK_THRESHOLD_PCT: float   = float(_T.get("stall_peak_threshold_pct", 1.0))
 ORDER_TIMEOUT_MIN: int      = int(_T.get("order_timeout_minutes", 3))
 POLLING_INTERVAL: int       = int(_T.get("polling_interval_seconds", 60))
 # 保有ポジションの損切り/利確監視の間隔（新規エントリー探索より高頻度に回す）

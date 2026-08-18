@@ -11,6 +11,9 @@ trade:
   profit_lock_breakeven_floor_pct: 0.5       # ブレークイーブン確保時の下限（%）
   profit_lock_partial_trigger_ratio: 0.5     # 部分トレーリング開始の発動比率
   profit_lock_partial_trail_pct: 2.0         # 部分トレーリングの許容押し幅（高値からのpt）
+  # 停滞タイムアウト（出来高急増後に価格が追随せず停滞したまま長時間経過した場合の早期撤退）
+  stall_timeout_min: 30            # この分数経過してもピークが伸びなければ対象
+  stall_peak_threshold_pct: 1.0    # ピーク含み益がこの%未満なら「停滞」とみなす
   order_timeout_minutes: 3      # 指値注文タイムアウト（未約定でキャンセル）
   polling_interval_seconds: 60  # 新規エントリー探索（ランキング取得・surge評価）の間隔
   position_check_interval_seconds: 10  # 保有ポジションの損切り/利確監視の間隔（60秒だと損切りラインの超過が大きくなるため）

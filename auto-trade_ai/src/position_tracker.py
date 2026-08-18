@@ -16,6 +16,10 @@
 
   ※ キープゾーンは一度到達したら損切りラインに触れるかトレーリング/Claudeで
     決済されるまで維持する。
+
+  停滞タイムアウト: 出来高急増を見てエントリーしたが stall_timeout_min 分経っても
+  ピーク含み益が stall_peak_threshold_pct% に届かない（価格が追随しないまま停滞）
+  場合、損切りラインに触れるのを待たず現在値で撤退する（STALL_TIMEOUT）。
 """
 
 import logging
@@ -27,6 +31,8 @@ from src.config import (
     PROFIT_LOCK_BREAKEVEN_TRIGGER_RATIO,
     PROFIT_LOCK_PARTIAL_TRAIL_PCT,
     PROFIT_LOCK_PARTIAL_TRIGGER_RATIO,
+    STALL_PEAK_THRESHOLD_PCT,
+    STALL_TIMEOUT_MIN,
     STOP_LOSS_PCT_D,
     TAKE_PROFIT_PCT_D,
     TAKE_PROFIT_TRAILING_PCT,
@@ -142,6 +148,13 @@ class PositionTracker:
                             symbol, pnl_pct, peak, trailing_drop, claude_reason,
                         )
                         continue
+
+            # ── 停滞タイムアウト: 出来高急増後、価格が長時間追随しないまま停滞 ──
+            elif STALL_TIMEOUT_MIN > 0 and peak_pnl_pct < STALL_PEAK_THRESHOLD_PCT and (
+                (datetime.now() - datetime.fromisoformat(pos["opened_at"])).total_seconds() / 60
+                >= STALL_TIMEOUT_MIN
+            ):
+                reason = "STALL_TIMEOUT"
 
             else:
                 log.debug("監視中: %s 損益率 %+.2f%% (高値%+.2f%%)", symbol, pnl_pct, peak_pnl_pct)
