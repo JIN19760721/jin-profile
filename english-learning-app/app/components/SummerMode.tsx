@@ -5,7 +5,7 @@ import { useTTS } from "../hooks/useSpeech";
 import type { SummerProgress } from "../api/summer/progress/route";
 import type { SummerRankEntry } from "../api/summer/ranking/route";
 
-type Phase = "home" | "quiz" | "result";
+type Phase = "home" | "quiz" | "result" | "testSelect" | "testQuiz" | "testResult";
 type Pattern = 1 | 2;
 
 interface SessionQuestion {
@@ -20,6 +20,10 @@ interface SessionAnswer {
 }
 
 const SET_SIZE = 20;
+
+const WORD_TEST_COUNT = 8;
+const WORD_TEST_SIZE = 50;
+const WORD_TEST_START_ID = 601;
 
 const emptyProgress: SummerProgress = {
   perWord: {}, correctTotal: 0, answeredTotal: 0, coveredWords: [], lastUpdated: "",
@@ -71,6 +75,20 @@ function buildRound2(round1: SessionQuestion[]): SessionQuestion[] {
   return shuffle(flipped);
 }
 
+function getWordTestRange(testNumber: number): { start: number; end: number } {
+  const start = WORD_TEST_START_ID + (testNumber - 1) * WORD_TEST_SIZE;
+  return { start, end: start + WORD_TEST_SIZE - 1 };
+}
+
+function getWordTestWords(testNumber: number): SummerWord[] {
+  const { start, end } = getWordTestRange(testNumber);
+  return SUMMER_WORDS.filter((w) => w.id >= start && w.id <= end);
+}
+
+function buildWordTestQuestions(words: SummerWord[]): SessionQuestion[] {
+  return words.map((w) => ({ word: w, pattern: (Math.random() < 0.5 ? 1 : 2) as Pattern }));
+}
+
 function applySession(prev: SummerProgress, sessionWords: SummerWord[], answers: SessionAnswer[]): SummerProgress {
   const perWord = { ...prev.perWord };
   answers.forEach((a) => {
@@ -108,6 +126,15 @@ export default function SummerMode({ onBack }: { onBack: () => void }) {
   const [sessionAnswers, setSessionAnswers] = useState<SessionAnswer[]>([]);
   const [saving,         setSaving]         = useState(false);
   const [showHint,       setShowHint]       = useState(false);
+
+  const [testNumber,     setTestNumber]     = useState<number | null>(null);
+  const [testQuestions,  setTestQuestions]  = useState<SessionQuestion[]>([]);
+  const [testIndex,      setTestIndex]      = useState(0);
+  const [testAnswerInput,setTestAnswerInput]= useState("");
+  const [testSubmitted,  setTestSubmitted]  = useState(false);
+  const [testIsCorrect,  setTestIsCorrect]  = useState(false);
+  const [testAnswers,    setTestAnswers]    = useState<SessionAnswer[]>([]);
+  const [testShowHint,   setTestShowHint]   = useState(false);
 
   const { speak } = useTTS();
 
@@ -221,6 +248,42 @@ export default function SummerMode({ onBack }: { onBack: () => void }) {
   const round1Score = sessionAnswers.filter((a, i) => i < 20 && a.correct).length;
   const round2Score = sessionAnswers.filter((a, i) => i >= 20 && a.correct).length;
 
+  const startWordTest = (n: number) => {
+    const words = getWordTestWords(n);
+    setTestNumber(n);
+    setTestQuestions(buildWordTestQuestions(words));
+    setTestIndex(0);
+    setTestAnswers([]);
+    setTestAnswerInput("");
+    setTestSubmitted(false);
+    setTestShowHint(false);
+    setPhase("testQuiz");
+  };
+
+  const currentTestQ = testQuestions[testIndex];
+
+  const submitTestAnswer = () => {
+    if (!currentTestQ || testSubmitted) return;
+    const correct = checkAnswer(currentTestQ.pattern, currentTestQ.word, testAnswerInput);
+    setTestIsCorrect(correct);
+    setTestSubmitted(true);
+    setTestAnswers((a) => [...a, { wordId: currentTestQ.word.id, pattern: currentTestQ.pattern, correct }]);
+  };
+
+  const nextTestQuestion = () => {
+    const next = testIndex + 1;
+    if (next < testQuestions.length) {
+      setTestIndex(next);
+      setTestAnswerInput("");
+      setTestSubmitted(false);
+      setTestShowHint(false);
+      return;
+    }
+    setPhase("testResult");
+  };
+
+  const testScore = testAnswers.filter((a) => a.correct).length;
+
   const myRank = ranking?.find((r) => r.nickname === nickname);
 
   // ── ニックネーム登録待ち ──────────────────────────────
@@ -300,14 +363,14 @@ export default function SummerMode({ onBack }: { onBack: () => void }) {
             {progress ? "クイズを開始する（40問）" : "読み込み中…"}
           </button>
 
-          <button disabled
-            style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 16,
-                     padding: "16px", color: "#64748b", fontWeight: 700, fontSize: 16,
-                     cursor: "default", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
-            単語テスト
-            <span style={{ background: "#334155", color: "#94a3b8", fontSize: 11, fontWeight: 600,
+          <button onClick={() => setPhase("testSelect")}
+            style={{ background: "linear-gradient(135deg,#1d4ed8,#0ea5e9)", border: "none",
+                     borderRadius: 16, padding: "16px", color: "#fff", fontWeight: 700, fontSize: 16,
+                     cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+            📝 単語テスト
+            <span style={{ background: "rgba(255,255,255,0.25)", color: "#fff", fontSize: 11, fontWeight: 600,
                            borderRadius: 999, padding: "3px 10px" }}>
-              後日公開予定
+              テスト1〜8（各50問）
             </span>
           </button>
 
@@ -441,6 +504,170 @@ export default function SummerMode({ onBack }: { onBack: () => void }) {
               </button>
             </div>
           )}
+        </main>
+      </div>
+    );
+  }
+
+  // ── テスト選択 ────────────────────────────────────────
+  if (phase === "testSelect") {
+    return (
+      <div style={{ maxWidth: 640, width: "100%", margin: "0 auto" }}>
+        <Header title="夏休み課題対策モード" onBack={() => setPhase("home")} />
+        <main style={{ padding: "8px 16px 40px", display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ background: "linear-gradient(135deg,#1d4ed8,#0ea5e9)", borderRadius: 20,
+                        padding: 20, color: "#fff" }}>
+            <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 4 }}>📝 単語テスト</h2>
+            <p style={{ fontSize: 13, lineHeight: 1.6, opacity: 0.9 }}>
+              各テストは単語番号50語区切り・全50問。1問ごとに英→日／日→英がランダムに出題されます。
+            </p>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10 }}>
+            {Array.from({ length: WORD_TEST_COUNT }, (_, i) => i + 1).map((n) => {
+              const { start, end } = getWordTestRange(n);
+              return (
+                <button key={n} onClick={() => startWordTest(n)}
+                  style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 14,
+                           padding: "16px 10px", color: "#e2e8f0", cursor: "pointer",
+                           display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                  <span style={{ fontSize: 16, fontWeight: 800 }}>テスト{n}</span>
+                  <span style={{ fontSize: 11, color: "#94a3b8" }}>{start}〜{end}番</span>
+                </button>
+              );
+            })}
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // ── テスト・クイズ ────────────────────────────────────
+  if (phase === "testQuiz") {
+    if (!currentTestQ) return null;
+    const promptLabel = currentTestQ.pattern === 1 ? "日本語の意味を入力してください" : "英単語を入力してください";
+    const promptText  = currentTestQ.pattern === 1 ? currentTestQ.word.english : currentTestQ.word.japanese;
+
+    return (
+      <div style={{ maxWidth: 640, width: "100%", margin: "0 auto" }}>
+        <Header title="夏休み課題対策モード" onBack={onBack} />
+        <main style={{ padding: "8px 16px 40px", display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ color: "#38bdf8", fontWeight: 700, fontSize: 13 }}>テスト{testNumber}</span>
+            <span style={{ color: "#94a3b8", fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
+              {testIndex + 1} / {testQuestions.length}
+            </span>
+          </div>
+          <div style={{ height: 4, background: "#1e293b", borderRadius: 2, overflow: "hidden" }}>
+            <div style={{ width: `${((testIndex) / testQuestions.length) * 100}%`, height: "100%",
+                          background: "#0ea5e9", transition: "width 0.3s ease" }} />
+          </div>
+
+          <div style={{ background: "linear-gradient(135deg,#1d4ed8,#0ea5e9)", borderRadius: 20,
+                        padding: 28, textAlign: "center", color: "#fff" }}>
+            <p style={{ fontSize: 12, opacity: 0.85, marginBottom: 10 }}>{promptLabel}</p>
+            <p style={{ fontSize: currentTestQ.pattern === 1 ? 32 : 20, fontWeight: 800, lineHeight: 1.4 }}>
+              {promptText}
+            </p>
+            {currentTestQ.pattern === 1 && (
+              <button onClick={() => speak(currentTestQ.word.english)}
+                style={{ marginTop: 12, background: "rgba(255,255,255,0.25)", border: "none",
+                         borderRadius: 999, padding: "8px 18px", color: "#fff", fontWeight: 600,
+                         fontSize: 13, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+                🔊 発音を聞く
+              </button>
+            )}
+          </div>
+
+          {!testSubmitted ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  autoFocus
+                  value={testAnswerInput}
+                  onChange={(e) => setTestAnswerInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && submitTestAnswer()}
+                  placeholder={currentTestQ.pattern === 1 ? "例：達成する" : "例：achieve"}
+                  style={{ flex: 1, padding: "12px 14px", borderRadius: 12, background: "#1e293b",
+                           border: "1px solid #334155", color: "#e2e8f0", fontSize: 17, outline: "none" }}
+                />
+                <button onClick={submitTestAnswer} disabled={!testAnswerInput.trim()}
+                  style={{ background: testAnswerInput.trim() ? "#0284c7" : "#1e293b", border: "none",
+                           borderRadius: 12, padding: "12px 22px", color: "#fff", fontWeight: 700,
+                           fontSize: 15, cursor: testAnswerInput.trim() ? "pointer" : "default" }}>
+                  回答
+                </button>
+              </div>
+              {currentTestQ.pattern === 2 && (
+                testShowHint ? (
+                  <p style={{ color: "#38bdf8", fontSize: 15, fontWeight: 700, letterSpacing: 2,
+                             textAlign: "center", fontFamily: "ui-monospace,Consolas,monospace" }}>
+                    💡 {letterHint(currentTestQ.word.english)}（{currentTestQ.word.english.length}文字）
+                  </p>
+                ) : (
+                  <button onClick={() => setTestShowHint(true)}
+                    style={{ alignSelf: "center", background: "none", border: "1px solid #334155",
+                             borderRadius: 999, padding: "5px 16px", color: "#94a3b8",
+                             fontSize: 12, cursor: "pointer" }}>
+                    💡 ヒントを見る（頭文字・文字数）
+                  </button>
+                )
+              )}
+            </div>
+          ) : (
+            <div style={{ background: testIsCorrect ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.1)",
+                          border: `1px solid ${testIsCorrect ? "#10b981" : "#ef4444"}`,
+                          borderRadius: 14, padding: 16, textAlign: "center" }}>
+              <p style={{ color: testIsCorrect ? "#34d399" : "#f87171", fontWeight: 700, fontSize: 16, marginBottom: 6 }}>
+                {testIsCorrect ? "正解！ 🎉" : "不正解 😢"}
+              </p>
+              <p style={{ color: "#cbd5e1", fontSize: 14 }}>
+                {currentTestQ.word.english} ＝ {currentTestQ.word.japanese}
+              </p>
+              <p style={{ color: "#64748b", fontSize: 12, marginTop: 4, fontStyle: "italic" }}>
+                {currentTestQ.word.example}
+              </p>
+              <button onClick={nextTestQuestion}
+                style={{ marginTop: 12, background: "#0284c7", border: "none", borderRadius: 10,
+                         padding: "10px 24px", color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                次へ →
+              </button>
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  }
+
+  // ── テスト結果 ────────────────────────────────────────
+  if (phase === "testResult") {
+    return (
+      <div style={{ maxWidth: 640, width: "100%", margin: "0 auto" }}>
+        <Header title="夏休み課題対策モード" onBack={onBack} />
+        <main style={{ padding: "8px 16px 40px", display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <p style={{ fontSize: 48 }}>{testScore >= 40 ? "🎉" : "📚"}</p>
+            <h2 style={{ fontSize: 20, fontWeight: 700 }}>テスト{testNumber} 終了！</h2>
+          </div>
+          <div style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 16, padding: 20,
+                        textAlign: "center" }}>
+            <div style={{ color: "#38bdf8", fontWeight: 800, fontSize: 36 }}>{testScore}/{testQuestions.length}</div>
+            <div style={{ color: "#64748b", fontSize: 12, marginTop: 4 }}>正解数</div>
+          </div>
+          <button onClick={() => testNumber && startWordTest(testNumber)}
+            style={{ background: "linear-gradient(135deg,#1d4ed8,#0ea5e9)", border: "none", borderRadius: 16,
+                     padding: "16px", color: "#fff", fontWeight: 700, fontSize: 16, cursor: "pointer" }}>
+            もう一度このテストを受ける
+          </button>
+          <button onClick={() => setPhase("testSelect")}
+            style={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 16,
+                     padding: "16px", color: "#e2e8f0", fontWeight: 700, fontSize: 16, cursor: "pointer" }}>
+            他のテストを選ぶ
+          </button>
+          <button onClick={() => setPhase("home")}
+            style={{ background: "none", border: "none", padding: "8px", color: "#64748b",
+                     fontWeight: 600, fontSize: 14, cursor: "pointer" }}>
+            ホームに戻る
+          </button>
         </main>
       </div>
     );
