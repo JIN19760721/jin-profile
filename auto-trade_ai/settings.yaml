@@ -30,7 +30,10 @@ trade:
   pre_market_llm_disclosure_after_hour: 15     # 前営業日のこの時刻以降の開示を「引け後」として加味
   pre_market_llm_disclosure_max_extras: 15     # モメンタム候補外から開示のみで補完する銘柄数の上限
   watch_advisor_model: "claude-opus-4-8"       # ウォッチリスト買い時・売り時アドバイス（--advise）で使うモデル
-  force_close_time: "15:20"     # 強制全ポジション決済時刻
+  force_close_time: "15:00"     # 強制全ポジション決済時刻
+  force_close_confirm_timeout_min: 20  # 強制クローズ後、約定確定を待つ最大時間（分）
+  force_close_discount_window_min: 5   # 上記のうち、終盤この分数は値引きモードで再発注する
+  force_close_discount_pct: 0.3        # 値引きモード中の指値の値引き幅（%）
   daily_loss_limit: -30000      # 日次損失上限（円）。超過したら新規発注停止
   reentry_cooldown_minutes: 60  # 同一銘柄を当日決済後、再エントリーまでの待機時間（分）。0で無効
   allow_same_day_reentry: false # 現物取引の差金決済制限が未確認のため、同一銘柄は1日1往復までに制限（安全側）

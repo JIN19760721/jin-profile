@@ -195,11 +195,13 @@ class OrderManager:
             )
         return finalized
 
-    def check_pending_orders(self) -> list[dict]:
+    def check_pending_orders(self, price_discount_pct: float = 0.0) -> list[dict]:
         """PENDING 注文を確認し、約定済みとタイムアウトを処理する。約定済みリストを返す。
 
         SELL注文が確定クローズに至った場合は close_price/pnl/pnl_pct/close_reason を
         エントリに含める（呼び出し側で notify_closed 相当の通知を出す判断材料にする）。
+        price_discount_pct > 0 の場合、タイムアウト後の売り再発注を現在値からその分
+        値引きした指値で行う（強制クローズ終盤の約定優先モード用）。
         """
         pending = db.get_pending_orders(dry_run=self.dry_run)
         filled_list: list[dict] = []
@@ -278,26 +280,54 @@ class OrderManager:
                     remaining = order["qty"] - recv_qty
                     if remaining <= 0:
                         continue
-                    self._retry_sell(order["symbol"], order["symbol_name"], remaining)
+                    self._retry_sell(
+                        order["symbol"], order["symbol_name"], remaining,
+                        discount_pct=price_discount_pct,
+                    )
 
         # CLOSING中だが対応するPENDING注文が無いポジション（前回の再発注失敗等）を救済する
-        self._recover_orphaned_closing_positions()
+        self._recover_orphaned_closing_positions(discount_pct=price_discount_pct)
 
         return filled_list
 
-    def _retry_sell(self, symbol: str, symbol_name: str, qty: int) -> None:
+    def _retry_sell(
+        self, symbol: str, symbol_name: str, qty: int, discount_pct: float = 0.0,
+    ) -> None:
         current = self._get_current_price(symbol)
         if current is None:
             log.warning("%s: 現在値取得失敗のため売り再発注を見送ります（次tickで再試行）", symbol)
             return
-        new_order_id = self.place_sell_order(symbol, symbol_name, current, qty)
+        price = round(current * (1 - discount_pct / 100)) if discount_pct > 0 else current
+        new_order_id = self.place_sell_order(symbol, symbol_name, price, qty)
         if new_order_id:
             db.update_closing_order_id(symbol, new_order_id, dry_run=self.dry_run)
-            log.info("売り注文再発注: %s %s %d株 @ %.0f円", new_order_id, symbol, qty, current)
+            log.info(
+                "売り注文再発注: %s %s %d株 @ %.0f円%s",
+                new_order_id, symbol, qty, price,
+                f"（現在値{current:.0f}円から{discount_pct:.1f}%値引き）" if discount_pct > 0 else "",
+            )
         else:
             log.error("%s: 売り再発注に失敗しました。次tickで再試行します。", symbol)
 
-    def _recover_orphaned_closing_positions(self) -> None:
+    def force_reprice_closing_orders(self, discount_pct: float) -> None:
+        """CLOSING中の未約定売り注文をすべて即キャンセルし、値引き価格で再発注する。
+
+        タイムアウトを待たずに即座に値引きモードへ切り替えたい場合に使う
+        （強制クローズ確認ループが値引きフェーズに入った瞬間に呼ぶ想定）。
+        """
+        for pos in db.get_closing_positions(dry_run=self.dry_run):
+            oid = pos.get("closing_order_id")
+            if oid:
+                self.cancel_order(oid)
+            remaining = pos["qty"] - (pos.get("closing_filled_qty") or 0)
+            if remaining <= 0:
+                continue
+            self._retry_sell(
+                pos["symbol"], pos.get("symbol_name") or "", remaining,
+                discount_pct=discount_pct,
+            )
+
+    def _recover_orphaned_closing_positions(self, discount_pct: float = 0.0) -> None:
         pending_ids = {o["order_id"] for o in db.get_pending_orders(dry_run=self.dry_run)}
         for pos in db.get_closing_positions(dry_run=self.dry_run):
             if pos.get("closing_order_id") in pending_ids:
@@ -306,4 +336,7 @@ class OrderManager:
             if remaining <= 0:
                 continue
             log.warning("%s: CLOSING中だがPENDING注文が見つかりません。再発注します。", pos["symbol"])
-            self._retry_sell(pos["symbol"], pos.get("symbol_name") or "", remaining)
+            self._retry_sell(
+                pos["symbol"], pos.get("symbol_name") or "", remaining,
+                discount_pct=discount_pct,
+            )

@@ -19,6 +19,9 @@ from src import db, notifier, price_cache
 from src.config import (
     DB_PATH,
     ENTRY_EMBARGO_MIN,
+    FORCE_CLOSE_CONFIRM_TIMEOUT_MIN,
+    FORCE_CLOSE_DISCOUNT_PCT,
+    FORCE_CLOSE_DISCOUNT_WINDOW_MIN,
     FORCE_CLOSE_TIME,
     ORDER_PRICE_BUFFER_PCT,
     ORDER_QTY,
@@ -364,20 +367,42 @@ class TradeEngine:
                 )
 
     def _wait_for_closing_confirmation(
-        self, timeout_min: float = 10.0, poll_sec: float = 10.0,
+        self,
+        timeout_min: float = FORCE_CLOSE_CONFIRM_TIMEOUT_MIN,
+        poll_sec: float = 10.0,
+        discount_window_min: float = FORCE_CLOSE_DISCOUNT_WINDOW_MIN,
+        discount_pct: float = FORCE_CLOSE_DISCOUNT_PCT,
     ) -> None:
         """強制クローズ後、全CLOSINGポジションの約定確定を一定時間待つ（本番のみ）。
 
-        タイムアウトしても手動確認が必要な旨をログ・通知したうえで終了する
+        残り discount_window_min 分になった時点で、未約定の売り注文を即座に
+        キャンセルして discount_pct% 値引きした指値で再発注し、以降も
+        タイムアウトのたびに値引き価格で再発注し続ける（約定を優先するモード）。
+        それでもタイムアウトしたら手動確認が必要な旨をログ・通知したうえで終了する
         （エンジンを無期限に動かし続けるわけにはいかないため）。
         """
         deadline = time.monotonic() + timeout_min * 60
+        discount_start = deadline - discount_window_min * 60
+        discount_triggered = False
+
         while time.monotonic() < deadline:
             still_closing = db.get_closing_positions(dry_run=self.dry_run)
             if not still_closing:
                 log.info("全ポジションの決済が確定しました。")
                 return
-            filled_list = self._om.check_pending_orders()
+
+            in_discount_phase = discount_pct > 0 and time.monotonic() >= discount_start
+            if in_discount_phase and not discount_triggered:
+                log.warning(
+                    "強制クローズ: 残り%.0f分。売り指値を%.1f%%値引きして即再発注します。",
+                    discount_window_min, discount_pct,
+                )
+                self._om.force_reprice_closing_orders(discount_pct)
+                discount_triggered = True
+
+            filled_list = self._om.check_pending_orders(
+                price_discount_pct=discount_pct if in_discount_phase else 0.0,
+            )
             self._notify_filled_orders(filled_list)
             time.sleep(poll_sec)
 

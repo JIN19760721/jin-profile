@@ -99,6 +99,10 @@ PRE_MARKET_LLM_DISCLOSURE_MAX_EXTRAS: int   = int(_T.get("pre_market_llm_disclos
 WATCH_ADVISOR_MODEL: str    = str(_T.get("watch_advisor_model", "claude-opus-4-8"))
 CLAUDE_TP_MODEL: str        = str(_T.get("claude_tp_model", "claude-haiku-4-5-20251001"))
 FORCE_CLOSE_TIME: str       = str(_T.get("force_close_time", "15:20"))
+# 強制クローズ後の約定確認待ち（終盤discount_window_min分は指値をdiscount_pct%値引きして再発注）
+FORCE_CLOSE_CONFIRM_TIMEOUT_MIN: float = float(_T.get("force_close_confirm_timeout_min", 10))
+FORCE_CLOSE_DISCOUNT_WINDOW_MIN: float = float(_T.get("force_close_discount_window_min", 0))
+FORCE_CLOSE_DISCOUNT_PCT: float        = float(_T.get("force_close_discount_pct", 0.0))
 MIN_SCORE_TO_ENTER: float   = float(_T.get("min_score_to_enter", 60.0))
 DAILY_LOSS_LIMIT: float     = float(_T.get("daily_loss_limit", -30000))
 # 同一銘柄を当日決済後、再エントリーまでの待機時間（分）。0で無効
