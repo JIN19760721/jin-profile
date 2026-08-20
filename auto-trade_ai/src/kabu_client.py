@@ -3,12 +3,17 @@ import time
 
 import requests
 
+from src import notifier
 from src.config import API_PASSWORD, BASE_URL, KABU_ENV
 
 log = logging.getLogger(__name__)
 
 _RATE_LIMIT_RETRIES = 3
 _RATE_LIMIT_WAIT_SEC = 1.5
+# 一度成功した後、この分数以上認証が回復しなければ1回だけ通知を出す
+# （kabuステーションは取引時間中に原因不明のログアウトが発生することがあり、
+#  こちらからの自動再認証だけでは回復せずアプリの手動再起動が必要な場合がある）
+_AUTH_FAILURE_ALERT_THRESHOLD_MIN = 3.0
 
 
 class KabuClient:
@@ -17,6 +22,8 @@ class KabuClient:
     def __init__(self) -> None:
         self._token: str | None = None
         self._session = requests.Session()
+        self._last_auth_success: float | None = None
+        self._auth_failure_alerted = False
 
     def authenticate(self) -> None:
         """POST /token でAPIトークンを取得する。"""
@@ -35,20 +42,45 @@ class KabuClient:
             )
             resp.raise_for_status()
         except requests.ConnectionError:
+            self._record_auth_failure()
             raise ConnectionError(
                 f"kabuステーションに接続できませんでした ({BASE_URL})。"
                 "kabuステーションが起動中かつAPI利用設定がONであることを確認してください。"
             )
         except requests.HTTPError as e:
+            self._record_auth_failure()
             raise RuntimeError(f"認証に失敗しました (HTTP {e.response.status_code}): {e}")
 
         token = resp.json().get("Token")
         if not token:
+            self._record_auth_failure()
             raise RuntimeError(
                 "トークンが取得できませんでした。APIパスワードを確認してください。"
             )
         self._token = token
+        self._last_auth_success = time.monotonic()
+        self._auth_failure_alerted = False
         log.info("認証成功")
+
+    def _record_auth_failure(self) -> None:
+        """起動後に一度成功した認証が、長時間回復しない場合に1回だけ通知する。
+
+        起動直後（一度も成功していない）の失敗は _wait_for_kabu_station 側の
+        リトライ・エラー表示に委ねるため対象外とする。
+        """
+        if self._last_auth_success is None or self._auth_failure_alerted:
+            return
+        elapsed_min = (time.monotonic() - self._last_auth_success) / 60
+        if elapsed_min < _AUTH_FAILURE_ALERT_THRESHOLD_MIN:
+            return
+        log.error("kabu STATION認証が%.0f分以上回復していません。要確認。", elapsed_min)
+        notifier.send(
+            f"kabu STATION認証が{elapsed_min:.0f}分以上失敗し続けています。"
+            "自動再認証では回復しない既知の現象（取引時間中の原因不明ログアウト）の"
+            "可能性があります。kabuステーションアプリの再起動を試してください。",
+            title="[要確認] kabu STATION 認証異常",
+        )
+        self._auth_failure_alerted = True
 
     # ── 内部ヘルパー ──────────────────────────────────────────────────────────
 
