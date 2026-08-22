@@ -468,6 +468,9 @@ class TradeEngine:
         self._evaluate_surge_scores(price_filtered)
 
         # ⑤ 経路D のみ: PRE_SURGE_SETUP（価格未動・出来高先行）
+        # 値上がり率ランキングにも重複出現している銘柄は、その日の値動きが
+        # 既に顕在化済み（＝価格未動の前提と矛盾）であり、過去データで
+        # 損切り率59%・合計損益マイナスと明確に不利なため除外する。
         path_d_symbols: set[str] = set()
         entry_candidates: list[dict] = []
         if PATHD_ENABLED:
@@ -476,6 +479,7 @@ class TradeEngine:
                 if c.get("surge_signal") == "PRE_SURGE_SETUP"
                 and (c.get("volume_spike_ratio") or 0) >= PATHD_MIN_VOLUME_SPIKE
                 and (c.get("pre_surge_confirm_count") or 0) >= PATHD_CONFIRM_MIN
+                and "値上がり率" not in (c.get("reasons") or "")
             ]
             path_d_symbols = {c.get("symbol") for c in entry_candidates}
             log.info("エントリー候補（経路D）: %d件", len(entry_candidates))
