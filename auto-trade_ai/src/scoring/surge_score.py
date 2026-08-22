@@ -241,7 +241,7 @@ def calculate_surge_score(
     pre_surge_setup = (
         not overheat_flag
         and not no_volume
-        and price_change_5m < 2.0      # 5分間でまだ動いていない
+        and -1.0 <= price_change_5m < 2.0  # 5分間でまだ動いていない（下落中の反落は除外）
         and abs(price_change_1m) < 0.5  # 直前1分は横ばい（加速していない）
         and (vwap is None or vwap <= 0 or vwap_position >= 0.0)  # VWAP以上（買い蓄積の証左）
     )
