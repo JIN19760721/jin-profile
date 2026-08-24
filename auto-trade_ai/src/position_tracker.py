@@ -42,6 +42,8 @@ from src.kabu_client import KabuClient
 log = logging.getLogger(__name__)
 
 EXCHANGE_CODE = 1
+# 決済に至らない通常監視をINFOログに残す間隔（分）
+_MONITOR_LOG_INTERVAL_MIN = 5
 
 
 class PositionTracker:
@@ -57,6 +59,9 @@ class PositionTracker:
         self._claude_reasons:   dict[str, str] = {}   # symbol → 理由文字列
         # check_all() で取得した直近価格（同一tickでの board API 二重呼び出しを防ぐ）
         self._last_price: dict[str, float] = {}
+        # symbol → 最後に監視ログ(INFO)を出した経過分数（勝ちトレードの立ち上がり速度を
+        # 事後分析できるよう、決済に至らない通常監視も一定間隔でINFOに残す）
+        self._last_monitor_log_min: dict[str, int] = {}
         self._restore_state_from_db()
 
     def _restore_state_from_db(self) -> None:
@@ -157,7 +162,18 @@ class PositionTracker:
                 reason = "STALL_TIMEOUT"
 
             else:
-                log.debug("監視中: %s 損益率 %+.2f%% (高値%+.2f%%)", symbol, pnl_pct, peak_pnl_pct)
+                elapsed_min = int(
+                    (datetime.now() - datetime.fromisoformat(pos["opened_at"])).total_seconds() / 60
+                )
+                bucket = elapsed_min // _MONITOR_LOG_INTERVAL_MIN
+                if bucket > self._last_monitor_log_min.get(symbol, -1):
+                    self._last_monitor_log_min[symbol] = bucket
+                    log.info(
+                        "監視中: %s 経過%d分 損益率 %+.2f%% (高値%+.2f%%)",
+                        symbol, elapsed_min, pnl_pct, peak_pnl_pct,
+                    )
+                else:
+                    log.debug("監視中: %s 損益率 %+.2f%% (高値%+.2f%%)", symbol, pnl_pct, peak_pnl_pct)
                 continue
 
             # ── クローズ実行 ─────────────────────────────────────────────
@@ -177,6 +193,7 @@ class PositionTracker:
             self._keep_zone.discard(symbol)
             self._claude_decisions.pop(symbol, None)
             self._claude_reasons.pop(symbol, None)
+            self._last_monitor_log_min.pop(symbol, None)
 
             if self.dry_run:
                 # DRY-RUNは即仮約定するため従来通り即CLOSEDにする
@@ -281,6 +298,7 @@ class PositionTracker:
             self._keep_zone.discard(symbol)
             self._claude_decisions.pop(symbol, None)
             self._claude_reasons.pop(symbol, None)
+            self._last_monitor_log_min.pop(symbol, None)
 
             if self.dry_run:
                 pnl     = (current - pos["entry_price"]) * pos["qty"]
