@@ -302,12 +302,15 @@ def _fetch_disclosures() -> dict[str, list[dict]]:
         return {}
 
 
-def run(client: KabuClient | None) -> dict[str, str]:
-    """寄り付き前フィルタを実行し、結果を daily_candidates に保存・通知する。
+def run(client: KabuClient | None, notify: bool = True) -> dict[str, str]:
+    """寄り付き前フィルタを実行し、結果を daily_candidates に保存する。
 
     client が None の場合は /board を一切呼ばず、daily_candidates の
     score/reasons のみをもとに選定する（kabu API が全般的に使えない
-    手動モード向け）。
+    手動モード向け、およびザラ場中の定期再評価向け）。
+
+    notify=False の場合はLINE通知を送らない（ザラ場中に短い間隔で
+    繰り返し呼ぶ用途で、月間通知数の上限を消費しないようにするため）。
 
     戻り値: {symbol: reason} の選定結果（該当なし・失敗時は {}）。
     """
@@ -394,9 +397,10 @@ def run(client: KabuClient | None) -> dict[str, str]:
     for sym, reason in selected.items():
         log.info("  [選定] %s: %s", sym, reason)
 
-    try:
-        notifier.notify_llm_premarket_picks(selected)
-    except Exception as e:
-        log.warning("Claude選定結果の通知に失敗: %s", e)
+    if notify:
+        try:
+            notifier.notify_llm_premarket_picks(selected)
+        except Exception as e:
+            log.warning("Claude選定結果の通知に失敗: %s", e)
 
     return selected

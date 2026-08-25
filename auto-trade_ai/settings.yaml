@@ -29,6 +29,10 @@ trade:
   pre_market_llm_model: "claude-opus-4-8"
   pre_market_llm_universe_size: 25      # Claudeに提示する候補数（score上位から）
   pre_market_llm_top_n: 10              # Claudeに選ばせる件数
+  # ザラ場中の定期再評価（08:50時点では存在しなかった新規候補にもClaude判断を及ぼす）
+  # score/reasonsのみで評価（board取得なし・LINE通知なし）。コストは15分間隔で月$30弱の見込み。
+  intraday_llm_filter_enabled: true
+  intraday_llm_filter_interval_min: 15
   # TDnet適時開示の加味（非公式スクレイピング。失敗時はフェイルオープンで開示情報なし継続）
   pre_market_llm_disclosure_enabled: true      # false でこの機能のみ無効化
   pre_market_llm_disclosure_after_hour: 15     # 前営業日のこの時刻以降の開示を「引け後」として加味

@@ -148,6 +148,8 @@ def calculate_surge_score(
     avg_turnover_20d: float,
     previous_surge_score: float | None = None,
     elapsed_minutes: float | None = None,
+    previous_today_volume: float | None = None,
+    previous_today_turnover: float | None = None,
 ) -> SurgeResult:
     """
     急騰予兆スコアを計算して SurgeResult を返す。
@@ -165,6 +167,8 @@ def calculate_surge_score(
     avg_turnover_20d: 20 日平均売買代金 / 日（円）
     previous_surge_score: 前回の surge_score（None = 初回）
     elapsed_minutes : 取引時間経過分（None = 自動計算）
+    previous_today_volume  : 前回ポーリング時点の累積出来高（None = 初回・判定不能）
+    previous_today_turnover: 前回ポーリング時点の累積売買代金（None = 初回・判定不能）
     """
     if elapsed_minutes is None:
         elapsed_minutes = _elapsed_trading_minutes()
@@ -236,11 +240,23 @@ def calculate_surge_score(
     # ── 強制 NO_SURGE 条件 ───────────────────────────────────────────────
     no_volume = (volume_spike_ratio < 2.0 and turnover_spike_ratio < 2.0)
 
+    # 出来高が停止している（残り香）判定: 累計出来高・売買代金が前回ポーリングから
+    # 全く増えていない＝直近ずっと約定が発生していない。急増率は「本日累計÷経過時間」
+    # の投影値のため、寄り付き直後の一発の大口取引だけでも長時間 2.5倍超を維持してしまう。
+    # 判定不能（初回）はフェイルオープンで stale 扱いにしない。
+    volume_stalled = (
+        previous_today_volume is not None
+        and previous_today_turnover is not None
+        and today_volume <= previous_today_volume
+        and today_turnover <= previous_today_turnover
+    )
+
     # PRE_SURGE_SETUP 判定: 出来高急増しているが価格変化はまだ小さい（蓄積フェーズ）
     # 急騰後に飛び乗る「後追いエントリー」を避け、上がる前に入るための条件
     pre_surge_setup = (
         not overheat_flag
         and not no_volume
+        and not volume_stalled
         and -1.0 <= price_change_5m < 2.0  # 5分間でまだ動いていない（下落中の反落は除外）
         and abs(price_change_1m) < 0.5  # 直前1分は横ばい（加速していない）
         and (vwap is None or vwap <= 0 or vwap_position >= 0.0)  # VWAP以上（買い蓄積の証左）
@@ -256,6 +272,11 @@ def calculate_surge_score(
     elif no_volume:
         surge_signal = "NO_SURGE"
         surge_reason = "出来高・売買代金ともに急増なし"
+    elif volume_stalled and not overheat_flag and -1.0 <= price_change_5m < 2.0 and abs(price_change_1m) < 0.5:
+        # PRE_SURGE_SETUPの条件は満たすが出来高が前回ポーリングから増えていない
+        # ＝寄り付き等の一発の出来高の残り香で、実際には取引が止まっている
+        surge_signal = "NO_SURGE"
+        surge_reason = "出来高・売買代金が前回ポーリングから増加なし（残り香）"
     elif pre_surge_setup:
         surge_signal = "PRE_SURGE_SETUP"
     elif surge_score >= 85.0:

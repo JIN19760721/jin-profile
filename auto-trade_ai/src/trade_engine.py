@@ -23,6 +23,8 @@ from src.config import (
     FORCE_CLOSE_DISCOUNT_PCT,
     FORCE_CLOSE_DISCOUNT_WINDOW_MIN,
     FORCE_CLOSE_TIME,
+    INTRADAY_LLM_FILTER_ENABLED,
+    INTRADAY_LLM_FILTER_INTERVAL_MIN,
     ORDER_PRICE_BUFFER_PCT,
     ORDER_QTY,
     PATHD_ENABLED,
@@ -161,6 +163,10 @@ class TradeEngine:
         self._pre_surge_confirm: dict[str, int] = {}
         # surge 通知済みシグナル: symbol → 最後に通知したシグナル（遷移検知用）
         self._surge_notified_signal: dict[str, str] = {}
+        # 出来高停止検知用: symbol → 前回ポーリング時点の (today_volume, today_turnover)
+        self._prev_volume: dict[str, tuple[float, float]] = {}
+        # ザラ場中のClaude定期再評価: 最後に実行した時刻（monotonic）
+        self._last_intraday_llm_filter_at: float | None = None
         # エントリー直前通知済みセット（同一銘柄の重複通知防止）
         self._pre_entry_notified: set[str] = set()
         db.init_db(DB_PATH)
@@ -415,12 +421,34 @@ class TradeEngine:
             )
             notifier.send(f"[要確認] 強制クローズ未確定: {symbols}", dry_run=self.dry_run)
 
+    def _maybe_run_intraday_llm_filter(self) -> None:
+        """ザラ場中、一定間隔でClaude寄り付き前フィルタを再実行する。
+
+        08:50時点のフィルタは当日08:57以降のkabuランキングで新規に出現する
+        候補を評価できない（フェイルオープンで無審査のまま通過する）ため、
+        score/reasonsのみ（board取得なし）で定期的に再評価し直す。
+        LINE通知は送らない（頻度が高いため月間通知数を消費しないように）。
+        """
+        if not PRE_MARKET_LLM_ENABLED or not INTRADAY_LLM_FILTER_ENABLED:
+            return
+        now = time.monotonic()
+        if self._last_intraday_llm_filter_at is not None:
+            elapsed_min = (now - self._last_intraday_llm_filter_at) / 60
+            if elapsed_min < INTRADAY_LLM_FILTER_INTERVAL_MIN:
+                return
+        self._last_intraday_llm_filter_at = now
+        try:
+            premarket_llm_filter.run(None, notify=False)
+        except Exception as e:
+            log.warning("ザラ場中のClaude定期再評価に失敗しました（フィルタなしで継続）: %s", e)
+
     def _tick_entries(self) -> None:
         """低頻度ループ（POLLING_INTERVAL 間隔）: 新規エントリー探索（取引セッション内・様子見期間外のみ）。"""
         now_str = datetime.now().strftime("%H:%M:%S")
         if not is_in_trading_session(TRADING_SESSIONS):
             log.debug("[%s] 取引セッション外 — 新規エントリーをスキップ", now_str)
             return
+        self._maybe_run_intraday_llm_filter()
         if _in_entry_embargo(TRADING_SESSIONS, ENTRY_EMBARGO_MIN):
             log.info(
                 "[%s] セッション開始直後の様子見期間中（%d分）— 新規エントリーをスキップ",
@@ -674,6 +702,7 @@ class TradeEngine:
             avg_vol, avg_to = self._get_hist_avgs(symbol)
 
             prev_score = db.get_previous_surge_score(symbol)
+            prev_volume, prev_turnover = self._prev_volume.get(symbol, (None, None))
 
             try:
                 result = calculate_surge_score(
@@ -687,10 +716,14 @@ class TradeEngine:
                     avg_volume_20d=avg_vol,
                     avg_turnover_20d=avg_to,
                     previous_surge_score=prev_score,
+                    previous_today_volume=prev_volume,
+                    previous_today_turnover=prev_turnover,
                 )
             except Exception as e:
                 log.warning("surge_score 計算失敗 %s: %s", symbol, e)
                 continue
+            finally:
+                self._prev_volume[symbol] = (today_volume, today_turnover)
 
             db.save_surge_score(
                 symbol=symbol,
