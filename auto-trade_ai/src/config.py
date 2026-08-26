@@ -93,7 +93,7 @@ PRE_MARKET_LLM_TOP_N: int          = int(_T.get("pre_market_llm_top_n", 10))
 # 新規に出現した銘柄）にもClaude判断を及ぼすため、一定間隔でscore/reasonsのみを
 # 使って再評価する（LINE通知はしない。詳細はauto-trade_ai開発時のコスト試算を参照）
 INTRADAY_LLM_FILTER_ENABLED: bool      = bool(_T.get("intraday_llm_filter_enabled", True))
-INTRADAY_LLM_FILTER_INTERVAL_MIN: int  = int(_T.get("intraday_llm_filter_interval_min", 15))
+INTRADAY_LLM_FILTER_INTERVAL_MIN: int  = int(_T.get("intraday_llm_filter_interval_min", 30))
 # TDnet適時開示の加味（非公式スクレイピング。失敗時はフェイルオープンで開示情報なし継続）
 PRE_MARKET_LLM_DISCLOSURE_ENABLED: bool     = bool(_T.get("pre_market_llm_disclosure_enabled", True))
 # 前営業日の何時以降を「引け後の開示」として翌朝の判断材料に含めるか

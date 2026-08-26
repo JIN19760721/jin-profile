@@ -302,7 +302,11 @@ def _fetch_disclosures() -> dict[str, list[dict]]:
         return {}
 
 
-def run(client: KabuClient | None, notify: bool = True) -> dict[str, str]:
+def run(
+    client: KabuClient | None,
+    notify: bool = True,
+    include_disclosure_extras: bool = True,
+) -> dict[str, str]:
     """寄り付き前フィルタを実行し、結果を daily_candidates に保存する。
 
     client が None の場合は /board を一切呼ばず、daily_candidates の
@@ -311,6 +315,12 @@ def run(client: KabuClient | None, notify: bool = True) -> dict[str, str]:
 
     notify=False の場合はLINE通知を送らない（ザラ場中に短い間隔で
     繰り返し呼ぶ用途で、月間通知数の上限を消費しないようにするため）。
+
+    include_disclosure_extras=False の場合、モメンタム候補プール外の
+    TDnet開示のみ銘柄を評価対象に加えない。これらは daily_candidates に
+    存在しないため llm_selected の保存が何も反映されず、自動発注
+    パイプライン（ザラ場中の定期再評価）では評価コストが無駄になる。
+    通知目的の寄り付き前フィルタでのみ True にする意味がある。
 
     戻り値: {symbol: reason} の選定結果（該当なし・失敗時は {}）。
     """
@@ -350,7 +360,7 @@ def run(client: KabuClient | None, notify: bool = True) -> dict[str, str]:
     # あった銘柄を追加候補として補完する（自動発注パイプラインには入れない。
     # あくまでClaudeの評価対象・通知への追加情報として扱う）。
     extra_added = 0
-    if disclosures_by_symbol:
+    if include_disclosure_extras and disclosures_by_symbol:
         for symbol in disclosures_by_symbol:
             if symbol in pool_symbols:
                 continue

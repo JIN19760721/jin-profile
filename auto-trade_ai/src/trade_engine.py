@@ -438,7 +438,7 @@ class TradeEngine:
                 return
         self._last_intraday_llm_filter_at = now
         try:
-            premarket_llm_filter.run(None, notify=False)
+            premarket_llm_filter.run(None, notify=False, include_disclosure_extras=False)
         except Exception as e:
             log.warning("ザラ場中のClaude定期再評価に失敗しました（フィルタなしで継続）: %s", e)
 
