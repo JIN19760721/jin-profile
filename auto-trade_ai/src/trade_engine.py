@@ -25,6 +25,7 @@ from src.config import (
     FORCE_CLOSE_TIME,
     INTRADAY_LLM_FILTER_ENABLED,
     INTRADAY_LLM_FILTER_INTERVAL_MIN,
+    INTRADAY_LLM_FILTER_UNIVERSE_SIZE,
     ORDER_PRICE_BUFFER_PCT,
     ORDER_QTY,
     PATHD_ENABLED,
@@ -438,7 +439,11 @@ class TradeEngine:
                 return
         self._last_intraday_llm_filter_at = now
         try:
-            premarket_llm_filter.run(None, notify=False, include_disclosure_extras=False)
+            premarket_llm_filter.run(
+                None, notify=False, include_disclosure_extras=False,
+                exclude_price_change_overlap=True,
+                universe_size=INTRADAY_LLM_FILTER_UNIVERSE_SIZE,
+            )
         except Exception as e:
             log.warning("ザラ場中のClaude定期再評価に失敗しました（フィルタなしで継続）: %s", e)
 

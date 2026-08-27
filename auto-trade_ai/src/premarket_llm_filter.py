@@ -306,6 +306,8 @@ def run(
     client: KabuClient | None,
     notify: bool = True,
     include_disclosure_extras: bool = True,
+    exclude_price_change_overlap: bool = False,
+    universe_size: int | None = None,
 ) -> dict[str, str]:
     """寄り付き前フィルタを実行し、結果を daily_candidates に保存する。
 
@@ -322,6 +324,14 @@ def run(
     パイプライン（ザラ場中の定期再評価）では評価コストが無駄になる。
     通知目的の寄り付き前フィルタでのみ True にする意味がある。
 
+    exclude_price_change_overlap=True の場合、reasons に「値上がり率」を
+    含む候補（経路Dのエントリー対象から既に除外済み＝trade_engine.py参照）
+    を評価プールに入れない。screenerのscoreはこの重複を高く評価するため、
+    素通しだと上位25件が実質取引不可能な銘柄で占められ、実際に経路Dで
+    取引され得る銘柄がレビュー枠から常に弾き出されてしまう。
+
+    universe_size: 評価対象の上限件数。None の場合は PRE_MARKET_LLM_UNIVERSE_SIZE。
+
     戻り値: {symbol: reason} の選定結果（該当なし・失敗時は {}）。
     """
     candidates = db.get_daily_candidates()
@@ -329,7 +339,10 @@ def run(
         log.warning("Claude寄り付き前フィルタ: 候補銘柄がありません。スキップします。")
         return {}
 
-    pool = candidates[:PRE_MARKET_LLM_UNIVERSE_SIZE]
+    if exclude_price_change_overlap:
+        candidates = [c for c in candidates if "値上がり率" not in (c.get("reasons") or "")]
+
+    pool = candidates[:(universe_size if universe_size is not None else PRE_MARKET_LLM_UNIVERSE_SIZE)]
     system_prompt = _SYSTEM_PROMPT_BOARD if client is not None else _SYSTEM_PROMPT_NO_BOARD
     empty_warning = (
         "気配値を取得できた銘柄がありませんでした。" if client is not None

@@ -36,6 +36,9 @@ trade:
   # 15分間隔の必要性自体が薄い）。
   intraday_llm_filter_enabled: true
   intraday_llm_filter_interval_min: 30
+  # 値上がり率込み銘柄（経路D対象外）を除外すると母数が広がる（実績: 131件→44件）
+  # ため、08:50用のpre_market_llm_universe_size(25)より広めに取る
+  intraday_llm_filter_universe_size: 40
   # TDnet適時開示の加味（非公式スクレイピング。失敗時はフェイルオープンで開示情報なし継続）
   pre_market_llm_disclosure_enabled: true      # false でこの機能のみ無効化
   pre_market_llm_disclosure_after_hour: 15     # 前営業日のこの時刻以降の開示を「引け後」として加味
