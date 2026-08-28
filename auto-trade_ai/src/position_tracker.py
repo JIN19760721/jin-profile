@@ -28,7 +28,9 @@ from datetime import datetime
 from src import db, claude_tp_advisor
 from src.config import (
     PROFIT_LOCK_BREAKEVEN_FLOOR_PCT,
+    PROFIT_LOCK_BREAKEVEN_MIN_TICKS,
     PROFIT_LOCK_BREAKEVEN_TRIGGER_RATIO,
+    PROFIT_LOCK_PARTIAL_TRAIL_MIN_TICKS,
     PROFIT_LOCK_PARTIAL_TRAIL_PCT,
     PROFIT_LOCK_PARTIAL_TRIGGER_RATIO,
     STALL_PEAK_THRESHOLD_PCT,
@@ -44,6 +46,21 @@ log = logging.getLogger(__name__)
 EXCHANGE_CODE = 1
 # 決済に至らない通常監視をINFOログに残す間隔（分）
 _MONITOR_LOG_INTERVAL_MIN = 5
+
+
+def _tick_size(price: float) -> float:
+    """東証の呼び値の単位（一般銘柄向け、代表的な価格帯のみ）。"""
+    if price <= 3000:
+        return 1.0
+    if price <= 5000:
+        return 5.0
+    if price <= 10000:
+        return 10.0
+    if price <= 30000:
+        return 50.0
+    if price <= 50000:
+        return 100.0
+    return 500.0
 
 
 class PositionTracker:
@@ -126,12 +143,19 @@ class PositionTracker:
                 self._keep_zone.add(symbol)
 
             # ── 利益ロック床の算出（tp_pct 未到達の間のみ機能）──────────
+            # 低位株は呼び値1枚の値動きだけで%閾値を超えてしまうため、
+            # 呼び値ベースの最低ティック数を下限として床の実効幅を確保する
+            # （例: 120円銘柄は呼び値1枚=0.83%）。
+            tick_pct = _tick_size(entry) / entry * 100
+            breakeven_floor_pct = max(PROFIT_LOCK_BREAKEVEN_FLOOR_PCT, tick_pct * PROFIT_LOCK_BREAKEVEN_MIN_TICKS)
+            partial_trail_pct   = max(PROFIT_LOCK_PARTIAL_TRAIL_PCT, tick_pct * PROFIT_LOCK_PARTIAL_TRAIL_MIN_TICKS)
+
             floor_pct = sl_pct
             if peak_pnl_pct < tp_pct:
                 if peak_pnl_pct >= tp_pct * PROFIT_LOCK_PARTIAL_TRIGGER_RATIO:
-                    floor_pct = max(floor_pct, peak_pnl_pct - PROFIT_LOCK_PARTIAL_TRAIL_PCT)
+                    floor_pct = max(floor_pct, peak_pnl_pct - partial_trail_pct)
                 elif peak_pnl_pct >= tp_pct * PROFIT_LOCK_BREAKEVEN_TRIGGER_RATIO:
-                    floor_pct = max(floor_pct, PROFIT_LOCK_BREAKEVEN_FLOOR_PCT)
+                    floor_pct = max(floor_pct, breakeven_floor_pct)
 
             # ── 損切り／利益ロック ───────────────────────────────────────
             if pnl_pct <= floor_pct:

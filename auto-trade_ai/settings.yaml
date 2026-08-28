@@ -11,6 +11,11 @@ trade:
   profit_lock_breakeven_floor_pct: 0.5       # ブレークイーブン確保時の下限（%）
   profit_lock_partial_trigger_ratio: 0.5     # 部分トレーリング開始の発動比率
   profit_lock_partial_trail_pct: 2.0         # 部分トレーリングの許容押し幅（高値からのpt）
+  # 低位株では呼び値1枚の値動きだけで上記%閾値を超えてしまい、板ノイズと
+  # 本物のトレンド転換を区別できない（例: 120円銘柄は呼び値1枚=0.83%）。
+  # 呼び値ベースの最低ティック数を下限として床の実効幅を確保する。
+  profit_lock_breakeven_min_ticks: 2         # ブレークイーブン床の最低ティック数
+  profit_lock_partial_trail_min_ticks: 5     # 部分トレーリング床の最低ティック数
   # 停滞タイムアウト（出来高急増後に価格が追随せず停滞したまま長時間経過した場合の早期撤退）
   stall_timeout_min: 15            # この分数経過してもピークが伸びなければ対象
                                     # (旧30分。過去のSTALL_TIMEOUT該当10件は決済後も終日1.2%超の
@@ -29,16 +34,10 @@ trade:
   pre_market_llm_model: "claude-opus-4-8"
   pre_market_llm_universe_size: 25      # Claudeに提示する候補数（score上位から）
   pre_market_llm_top_n: 10              # Claudeに選ばせる件数
-  # ザラ場中の定期再評価（08:50時点では存在しなかった新規候補にもClaude判断を及ぼす）
-  # score/reasonsのみで評価（board取得・LINE通知・TDnet開示のみ候補の追加なし）。
-  # 8/26実績: 15分間隔だと1日の損益+300円に対しコスト概算189円（利益の6割超）と
-  # 割に合わなかったため、30分間隔に変更（候補が0件のtickが97%だったこともあり
-  # 15分間隔の必要性自体が薄い）。
-  intraday_llm_filter_enabled: true
-  intraday_llm_filter_interval_min: 30
-  # 値上がり率込み銘柄（経路D対象外）を除外すると母数が広がる（実績: 131件→44件）
-  # ため、08:50用のpre_market_llm_universe_size(25)より広めに取る
-  intraday_llm_filter_universe_size: 40
+  # エントリー直前のClaude最終確認（経路D）: バッチ定期再評価（旧方式、削除済み）は
+  # レビューのタイミングとエントリーのタイミングがズレる問題があったため、
+  # 条件を満たした候補1件だけをその場で確認する方式に変更。フェイルオープン。
+  entry_llm_check_enabled: true
   # TDnet適時開示の加味（非公式スクレイピング。失敗時はフェイルオープンで開示情報なし継続）
   pre_market_llm_disclosure_enabled: true      # false でこの機能のみ無効化
   pre_market_llm_disclosure_after_hour: 15     # 前営業日のこの時刻以降の開示を「引け後」として加味

@@ -73,6 +73,11 @@ PROFIT_LOCK_BREAKEVEN_TRIGGER_RATIO: float = float(_T.get("profit_lock_breakeven
 PROFIT_LOCK_BREAKEVEN_FLOOR_PCT: float     = float(_T.get("profit_lock_breakeven_floor_pct", 0.5))
 PROFIT_LOCK_PARTIAL_TRIGGER_RATIO: float   = float(_T.get("profit_lock_partial_trigger_ratio", 0.5))
 PROFIT_LOCK_PARTIAL_TRAIL_PCT: float       = float(_T.get("profit_lock_partial_trail_pct", 2.0))
+# 低位株では呼び値1枚の値動きだけで上記%閾値を超えてしまい、本物のトレンド転換と
+# 板ノイズを区別できない（例: 120円銘柄は呼び値1枚=0.83%）。呼び値ベースの
+# 最低ティック数を下限として、床の実効幅がそれを下回らないようにする。
+PROFIT_LOCK_BREAKEVEN_MIN_TICKS: int       = int(_T.get("profit_lock_breakeven_min_ticks", 2))
+PROFIT_LOCK_PARTIAL_TRAIL_MIN_TICKS: int   = int(_T.get("profit_lock_partial_trail_min_ticks", 5))
 # 停滞タイムアウト: 保有stall_timeout_min分経過してもピーク含み益がstall_peak_threshold_pct%に
 # 届かない（出来高急増後に価格が追随しないまま停滞している）場合、損切りラインを待たずに撤退する
 STALL_TIMEOUT_MIN: float          = float(_T.get("stall_timeout_min", 30))
@@ -89,14 +94,10 @@ PRE_MARKET_LLM_TIME: str           = str(_T.get("pre_market_llm_time", "08:30"))
 PRE_MARKET_LLM_MODEL: str          = str(_T.get("pre_market_llm_model", "claude-opus-4-8"))
 PRE_MARKET_LLM_UNIVERSE_SIZE: int  = int(_T.get("pre_market_llm_universe_size", 25))
 PRE_MARKET_LLM_TOP_N: int          = int(_T.get("pre_market_llm_top_n", 10))
-# ザラ場中の定期再評価: 08:50時点では存在しなかった候補（当日のkabuランキングで
-# 新規に出現した銘柄）にもClaude判断を及ぼすため、一定間隔でscore/reasonsのみを
-# 使って再評価する（LINE通知はしない。詳細はauto-trade_ai開発時のコスト試算を参照）
-INTRADAY_LLM_FILTER_ENABLED: bool      = bool(_T.get("intraday_llm_filter_enabled", True))
-INTRADAY_LLM_FILTER_INTERVAL_MIN: int  = int(_T.get("intraday_llm_filter_interval_min", 30))
-# 値上がり率込み銘柄を除外すると母数が広がる（実績: 131件→44件）ため、
-# 08:50用のPRE_MARKET_LLM_UNIVERSE_SIZE(25)より広めに取る
-INTRADAY_LLM_FILTER_UNIVERSE_SIZE: int = int(_T.get("intraday_llm_filter_universe_size", 40))
+# エントリー直前のClaude最終確認（経路D）: 条件を満たした候補1件のみをその場で
+# 評価する。PRE_SURGE_SETUP自体が「価格未動」を前提とするため、応答待ちの
+# 数秒が実害になりにくい。失敗時はフェイルオープン（Claude抜きで発注続行）。
+ENTRY_LLM_CHECK_ENABLED: bool = bool(_T.get("entry_llm_check_enabled", True))
 # TDnet適時開示の加味（非公式スクレイピング。失敗時はフェイルオープンで開示情報なし継続）
 PRE_MARKET_LLM_DISCLOSURE_ENABLED: bool     = bool(_T.get("pre_market_llm_disclosure_enabled", True))
 # 前営業日の何時以降を「引け後の開示」として翌朝の判断材料に含めるか

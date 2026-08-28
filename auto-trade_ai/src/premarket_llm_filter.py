@@ -302,35 +302,12 @@ def _fetch_disclosures() -> dict[str, list[dict]]:
         return {}
 
 
-def run(
-    client: KabuClient | None,
-    notify: bool = True,
-    include_disclosure_extras: bool = True,
-    exclude_price_change_overlap: bool = False,
-    universe_size: int | None = None,
-) -> dict[str, str]:
-    """寄り付き前フィルタを実行し、結果を daily_candidates に保存する。
+def run(client: KabuClient | None) -> dict[str, str]:
+    """寄り付き前フィルタを実行し、結果を daily_candidates に保存・通知する。
 
     client が None の場合は /board を一切呼ばず、daily_candidates の
     score/reasons のみをもとに選定する（kabu API が全般的に使えない
-    手動モード向け、およびザラ場中の定期再評価向け）。
-
-    notify=False の場合はLINE通知を送らない（ザラ場中に短い間隔で
-    繰り返し呼ぶ用途で、月間通知数の上限を消費しないようにするため）。
-
-    include_disclosure_extras=False の場合、モメンタム候補プール外の
-    TDnet開示のみ銘柄を評価対象に加えない。これらは daily_candidates に
-    存在しないため llm_selected の保存が何も反映されず、自動発注
-    パイプライン（ザラ場中の定期再評価）では評価コストが無駄になる。
-    通知目的の寄り付き前フィルタでのみ True にする意味がある。
-
-    exclude_price_change_overlap=True の場合、reasons に「値上がり率」を
-    含む候補（経路Dのエントリー対象から既に除外済み＝trade_engine.py参照）
-    を評価プールに入れない。screenerのscoreはこの重複を高く評価するため、
-    素通しだと上位25件が実質取引不可能な銘柄で占められ、実際に経路Dで
-    取引され得る銘柄がレビュー枠から常に弾き出されてしまう。
-
-    universe_size: 評価対象の上限件数。None の場合は PRE_MARKET_LLM_UNIVERSE_SIZE。
+    手動モード向け）。
 
     戻り値: {symbol: reason} の選定結果（該当なし・失敗時は {}）。
     """
@@ -339,10 +316,7 @@ def run(
         log.warning("Claude寄り付き前フィルタ: 候補銘柄がありません。スキップします。")
         return {}
 
-    if exclude_price_change_overlap:
-        candidates = [c for c in candidates if "値上がり率" not in (c.get("reasons") or "")]
-
-    pool = candidates[:(universe_size if universe_size is not None else PRE_MARKET_LLM_UNIVERSE_SIZE)]
+    pool = candidates[:PRE_MARKET_LLM_UNIVERSE_SIZE]
     system_prompt = _SYSTEM_PROMPT_BOARD if client is not None else _SYSTEM_PROMPT_NO_BOARD
     empty_warning = (
         "気配値を取得できた銘柄がありませんでした。" if client is not None
@@ -373,7 +347,7 @@ def run(
     # あった銘柄を追加候補として補完する（自動発注パイプラインには入れない。
     # あくまでClaudeの評価対象・通知への追加情報として扱う）。
     extra_added = 0
-    if include_disclosure_extras and disclosures_by_symbol:
+    if disclosures_by_symbol:
         for symbol in disclosures_by_symbol:
             if symbol in pool_symbols:
                 continue
@@ -420,10 +394,9 @@ def run(
     for sym, reason in selected.items():
         log.info("  [選定] %s: %s", sym, reason)
 
-    if notify:
-        try:
-            notifier.notify_llm_premarket_picks(selected)
-        except Exception as e:
-            log.warning("Claude選定結果の通知に失敗: %s", e)
+    try:
+        notifier.notify_llm_premarket_picks(selected)
+    except Exception as e:
+        log.warning("Claude選定結果の通知に失敗: %s", e)
 
     return selected
