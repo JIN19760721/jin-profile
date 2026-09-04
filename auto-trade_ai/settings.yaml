@@ -79,3 +79,22 @@ entry_policy:
   hourly_ma_short: 5
   hourly_ma_long: 20
   rci_period: 9  # watch_advisor.py の RCI 表示で使用
+
+# V2設計書（日本株デイトレード支援システムV2.0）Feature Flag。
+# Phase0（計測基盤）のみtrueで導入。他は全てfalseのまま据え置き、
+# 既存の経路D・surge_score・PRE_SURGE_SETUP等の売買判定を一切変更しない。
+# Phase1以降を有効化する際は、まずshadow modeで検証してから段階的にONにする。
+features:
+  enable_phase0_observability: true   # signal_history/candidate_outcomes記録（観測専用、売買判定に影響しない）
+  enable_rr_filter: false
+  enable_entry_score_v2: false
+  enable_opening_range: false
+  enable_breakout_pattern: false
+  enable_pullback_pattern: false
+  enable_vwap_reclaim: false
+  enable_price_structure: false
+  enable_time_bucket_filter: false
+  enable_orderbook_filter: false
+  enable_r_based_exit: false
+  enable_partial_take_profit: false
+  enable_market_filter: false

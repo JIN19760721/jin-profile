@@ -107,6 +107,66 @@ def init_db(db_path: Path = DB_PATH) -> None:
             memo         TEXT,
             added_at     TEXT NOT NULL
         );
+
+        -- Phase0（V2設計書）: 現行ロジックの計測・検証基盤。
+        -- 売買判定には一切使用しない。観測専用テーブル。
+
+        CREATE TABLE IF NOT EXISTS signal_history (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp             TEXT NOT NULL,
+            symbol                TEXT NOT NULL,
+            price                 REAL,
+            previous_signal       TEXT,
+            current_signal        TEXT NOT NULL,
+            surge_score           REAL,
+            surge_state           TEXT,
+            surge_reason          TEXT,
+            vwap                  REAL,
+            volume_spike_ratio    REAL,
+            turnover_spike_ratio  REAL,
+            near_day_high_ratio   REAL,
+            one_hour_trend        TEXT,
+            claude_result         TEXT,
+            claude_reason         TEXT,
+            entry_allowed         INTEGER,
+            no_entry_reason       TEXT,
+            strategy_version      TEXT NOT NULL DEFAULT 'v1_pathd'
+        );
+        CREATE INDEX IF NOT EXISTS idx_signal_history_symbol_ts
+            ON signal_history(symbol, timestamp);
+
+        CREATE TABLE IF NOT EXISTS candidate_outcomes (
+            candidate_id      TEXT PRIMARY KEY,
+            symbol            TEXT NOT NULL,
+            signal_time       TEXT NOT NULL,
+            signal_price      REAL NOT NULL,
+            signal_type       TEXT,
+            entered           INTEGER NOT NULL DEFAULT 0,
+            no_entry_reason   TEXT,
+            price_after_5m    REAL,
+            price_after_10m   REAL,
+            price_after_15m   REAL,
+            price_after_30m   REAL,
+            max_price         REAL,
+            min_price         REAL,
+            max_upside_pct    REAL,
+            max_downside_pct  REAL,
+            mfe_pct           REAL,
+            mae_pct           REAL,
+            first_touch       TEXT,
+            tracking_done     INTEGER NOT NULL DEFAULT 0,
+            strategy_version  TEXT NOT NULL DEFAULT 'v1_pathd'
+        );
+        CREATE INDEX IF NOT EXISTS idx_candidate_outcomes_symbol
+            ON candidate_outcomes(symbol, signal_time);
+
+        CREATE TABLE IF NOT EXISTS performance_snapshots (
+            date              TEXT NOT NULL,
+            strategy_version  TEXT NOT NULL DEFAULT 'v1_pathd',
+            metrics_json      TEXT NOT NULL,
+            created_at        TEXT NOT NULL,
+            PRIMARY KEY (date, strategy_version)
+        );
         """)
         # 既存 DB への列追加マイグレーション
         _migrate_daily_candidates(conn)
@@ -783,3 +843,85 @@ def save_llm_prefilter(
                    WHERE date=? AND symbol=?""",
                 (int(sym in selected), reason, today, sym),
             )
+
+
+# ─── Phase0: signal_history / candidate_outcomes / performance_snapshots ──────
+# 観測専用。売買判定には一切使用しない（V2設計書 Phase0）。
+
+def insert_signal_history(row: dict, db_path: Path = DB_PATH) -> None:
+    """signal_history に1件追加する（重複防止は呼び出し側=signal_repository.pyの責務）。"""
+    cols = [
+        "timestamp", "symbol", "price", "previous_signal", "current_signal",
+        "surge_score", "surge_state", "surge_reason", "vwap",
+        "volume_spike_ratio", "turnover_spike_ratio", "near_day_high_ratio",
+        "one_hour_trend", "claude_result", "claude_reason",
+        "entry_allowed", "no_entry_reason", "strategy_version",
+    ]
+    values = [row.get(c) for c in cols]
+    placeholders = ", ".join("?" for _ in cols)
+    with _connect(db_path) as conn:
+        conn.execute(
+            f"INSERT INTO signal_history ({', '.join(cols)}) VALUES ({placeholders})",
+            values,
+        )
+
+
+def get_last_signal(symbol: str, db_path: Path = DB_PATH) -> dict | None:
+    """指定銘柄の直近のsignal_history行を返す（previous_signal算出用）。"""
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM signal_history WHERE symbol=? ORDER BY id DESC LIMIT 1",
+            (symbol,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def insert_candidate_outcome(row: dict, db_path: Path = DB_PATH) -> None:
+    """candidate_outcomes に1件追加する（候補発生時点の初期値のみ）。"""
+    cols = [
+        "candidate_id", "symbol", "signal_time", "signal_price", "signal_type",
+        "entered", "no_entry_reason", "max_price", "min_price", "strategy_version",
+    ]
+    values = [row.get(c) for c in cols]
+    placeholders = ", ".join("?" for _ in cols)
+    with _connect(db_path) as conn:
+        conn.execute(
+            f"INSERT OR IGNORE INTO candidate_outcomes ({', '.join(cols)}) "
+            f"VALUES ({placeholders})",
+            values,
+        )
+
+
+def get_pending_candidate_outcomes(db_path: Path = DB_PATH) -> list[dict]:
+    """まだ追跡完了（30分経過）していない候補を返す。"""
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM candidate_outcomes WHERE tracking_done=0"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_candidate_outcome(candidate_id: str, fields: dict, db_path: Path = DB_PATH) -> None:
+    """candidate_outcomes の指定行を部分更新する。"""
+    if not fields:
+        return
+    set_clause = ", ".join(f"{k}=?" for k in fields)
+    with _connect(db_path) as conn:
+        conn.execute(
+            f"UPDATE candidate_outcomes SET {set_clause} WHERE candidate_id=?",
+            (*fields.values(), candidate_id),
+        )
+
+
+def save_performance_snapshot(
+    date_str: str, strategy_version: str, metrics_json: str, db_path: Path = DB_PATH,
+) -> None:
+    """performance_snapshots に日次スナップショットを保存（同日同versionは上書き）。"""
+    with _connect(db_path) as conn:
+        conn.execute(
+            """INSERT INTO performance_snapshots (date, strategy_version, metrics_json, created_at)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(date, strategy_version) DO UPDATE SET
+                 metrics_json=excluded.metrics_json, created_at=excluded.created_at""",
+            (date_str, strategy_version, metrics_json, _now()),
+        )

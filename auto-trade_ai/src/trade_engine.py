@@ -24,6 +24,7 @@ from src.config import (
     FORCE_CLOSE_DISCOUNT_WINDOW_MIN,
     FORCE_CLOSE_TIME,
     ENTRY_LLM_CHECK_ENABLED,
+    FEATURE_PHASE0_OBSERVABILITY,
     ORDER_PRICE_BUFFER_PCT,
     ORDER_QTY,
     PATHD_ENABLED,
@@ -44,6 +45,7 @@ from src.config import (
 )
 from src import premarket_llm_filter
 from src import entry_llm_check
+from src import signal_repository
 from src.entry_policy import check as policy_check
 from src.kabu_client import KabuClient
 from src.order_manager import OrderManager
@@ -78,6 +80,20 @@ def _is_past_or_equal(hhmm_str: str) -> bool:
     now_min = _hhmm_to_minutes(*_now_hhmm())
     t_min = _hhmm_to_minutes(*_parse_hhmm(hhmm_str))
     return now_min >= t_min
+
+
+def is_pathd_entry_candidate(c: dict) -> bool:
+    """経路Dのエントリー候補条件（PRE_SURGE_SETUP・出来高急増・連続確認・値上がり率除外）。
+
+    V2設計書Phase0の回帰テスト対象として純粋関数に抽出したのみで、判定内容は
+    従来と完全に同一（値上がり率ランキング込み銘柄は損切り率59%のため除外）。
+    """
+    return (
+        c.get("surge_signal") == "PRE_SURGE_SETUP"
+        and (c.get("volume_spike_ratio") or 0) >= PATHD_MIN_VOLUME_SPIKE
+        and (c.get("pre_surge_confirm_count") or 0) >= PATHD_CONFIRM_MIN
+        and "値上がり率" not in (c.get("reasons") or "")
+    )
 
 
 def is_in_trading_session(sessions: list[dict]) -> bool:
@@ -167,6 +183,8 @@ class TradeEngine:
         self._prev_volume: dict[str, tuple[float, float]] = {}
         # エントリー直前Claude確認: 本日すでに確認済みのsymbol → (判定, 理由)
         self._llm_entry_checked: dict[str, tuple[bool, str]] = {}
+        # V2設計書Phase0観測用: 本日すでにcandidate_outcomesへ記録済みのsymbol → candidate_id
+        self._candidate_ids_today: dict[str, str] = {}
         # エントリー直前通知済みセット（同一銘柄の重複通知防止）
         self._pre_entry_notified: set[str] = set()
         db.init_db(DB_PATH)
@@ -480,15 +498,40 @@ class TradeEngine:
         path_d_symbols: set[str] = set()
         entry_candidates: list[dict] = []
         if PATHD_ENABLED:
-            entry_candidates = [
-                c for c in price_filtered
-                if c.get("surge_signal") == "PRE_SURGE_SETUP"
-                and (c.get("volume_spike_ratio") or 0) >= PATHD_MIN_VOLUME_SPIKE
-                and (c.get("pre_surge_confirm_count") or 0) >= PATHD_CONFIRM_MIN
-                and "値上がり率" not in (c.get("reasons") or "")
-            ]
+            entry_candidates = [c for c in price_filtered if is_pathd_entry_candidate(c)]
             path_d_symbols = {c.get("symbol") for c in entry_candidates}
             log.info("エントリー候補（経路D）: %d件", len(entry_candidates))
+
+        # V2設計書Phase0: 経路D候補（見送り含む）をcandidate_outcomesに記録（観測専用）
+        if FEATURE_PHASE0_OBSERVABILITY:
+            for c in entry_candidates:
+                symbol = c.get("symbol") or ""
+                if symbol and symbol not in self._candidate_ids_today:
+                    cprice = c.get("board_price") or c.get("current_price") or 0
+                    cid = signal_repository.record_candidate(
+                        symbol, cprice, "PRE_SURGE_SETUP", entered=False, no_entry_reason=None,
+                    )
+                    if cid:
+                        self._candidate_ids_today[symbol] = cid
+
+        def _record_entry_outcome(
+            symbol: str, c: dict, entered: bool, no_entry_reason: str | None,
+            claude_result: str | None = None, claude_reason: str | None = None,
+        ) -> None:
+            """V2設計書Phase0: 個々のエントリー判断結果を記録する（観測専用）。"""
+            if not FEATURE_PHASE0_OBSERVABILITY:
+                return
+            cid = self._candidate_ids_today.get(symbol)
+            if cid:
+                db.update_candidate_outcome(cid, {
+                    "entered": int(entered), "no_entry_reason": no_entry_reason,
+                })
+            signal_repository.record_entry_decision(
+                symbol, c.get("board_price") or c.get("current_price"),
+                c.get("surge_score"), one_hour_trend=None,
+                claude_result=claude_result, claude_reason=claude_reason,
+                entry_allowed=entered, no_entry_reason=no_entry_reason,
+            )
 
         # ⑥ エントリーループ
         for c in entry_candidates:
@@ -504,11 +547,13 @@ class TradeEngine:
             risk_ok, risk_reason = self._rm.can_enter(symbol, board_price)
             if not risk_ok:
                 log.debug("[RISK NG] %s: %s", symbol, risk_reason)
+                _record_entry_outcome(symbol, c, False, f"RISK_NG: {risk_reason}")
                 continue
 
             policy_ok, policy_reason = policy_check(symbol)
             if not policy_ok:
                 log.info("[POLICY NG] %s: %s", symbol, policy_reason)
+                _record_entry_outcome(symbol, c, False, f"POLICY_NG: {policy_reason}")
                 continue
 
             if ENTRY_LLM_CHECK_ENABLED:
@@ -519,8 +564,18 @@ class TradeEngine:
                     self._llm_entry_checked[symbol] = (llm_enter, llm_reason)
                 if not llm_enter:
                     log.info("[LLM NG] %s: %s", symbol, llm_reason)
+                    _record_entry_outcome(
+                        symbol, c, False, f"LLM_NG: {llm_reason}",
+                        claude_result="NG", claude_reason=llm_reason,
+                    )
                     continue
                 log.info("[LLM OK] %s: %s", symbol, llm_reason)
+
+            _record_entry_outcome(
+                symbol, c, True, None,
+                claude_result="OK" if ENTRY_LLM_CHECK_ENABLED else None,
+                claude_reason=llm_reason if ENTRY_LLM_CHECK_ENABLED else None,
+            )
 
             order_id = self._om.place_buy_order(
                 symbol, name, board_price, ORDER_QTY, entry_path=entry_path,
@@ -751,6 +806,19 @@ class TradeEngine:
             else:
                 self._pre_surge_confirm[symbol] = 0
             c["pre_surge_confirm_count"] = self._pre_surge_confirm.get(symbol, 0)
+
+            # V2設計書Phase0: シグナル状態遷移・候補追跡の記録（観測専用、判定には影響しない）
+            if FEATURE_PHASE0_OBSERVABILITY:
+                signal_repository.record_signal_transition(
+                    symbol, cur_price, result.surge_signal,
+                    surge_score=result.surge_score,
+                    surge_reason=result.surge_reason,
+                    vwap_position=result.vwap_position,
+                    volume_spike_ratio=result.volume_spike_ratio,
+                    turnover_spike_ratio=result.turnover_spike_ratio,
+                    near_day_high_ratio=result.near_day_high_ratio,
+                )
+                signal_repository.update_candidate_prices(symbol, cur_price)
 
             log.info(
                 "[SURGE] %s %s: %.0f (%s) confirm=%d vol=%.1fx to=%.1fx 1m=%+.2f%% 5m=%+.2f%%",

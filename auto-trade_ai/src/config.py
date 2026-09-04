@@ -198,3 +198,23 @@ SIGNAL_WATCH: int              = int(_M.get("signal_watch", 55))
 
 # 出来高急増率の基準（1日あたりの平均出来高の推定値：株数）
 BASELINE_DAILY_VOLUME: int     = int(_M.get("baseline_daily_volume", 1_000_000))
+
+# ── V2設計書（日本株デイトレード支援システムV2.0）Feature Flag ──────────────────
+# Phase0（計測基盤）以外は全てfalseで導入し、既存の売買判定には一切影響しない。
+_F = _SETTINGS.get("features", {})
+
+FEATURE_PHASE0_OBSERVABILITY: bool = bool(_F.get("enable_phase0_observability", True))
+FEATURE_RR_FILTER: bool            = bool(_F.get("enable_rr_filter", False))
+FEATURE_ENTRY_SCORE_V2: bool       = bool(_F.get("enable_entry_score_v2", False))
+FEATURE_OPENING_RANGE: bool        = bool(_F.get("enable_opening_range", False))
+FEATURE_BREAKOUT_PATTERN: bool     = bool(_F.get("enable_breakout_pattern", False))
+FEATURE_PULLBACK_PATTERN: bool     = bool(_F.get("enable_pullback_pattern", False))
+FEATURE_VWAP_RECLAIM: bool         = bool(_F.get("enable_vwap_reclaim", False))
+FEATURE_PRICE_STRUCTURE: bool      = bool(_F.get("enable_price_structure", False))
+FEATURE_TIME_BUCKET_FILTER: bool   = bool(_F.get("enable_time_bucket_filter", False))
+FEATURE_ORDERBOOK_FILTER: bool     = bool(_F.get("enable_orderbook_filter", False))
+FEATURE_R_BASED_EXIT: bool         = bool(_F.get("enable_r_based_exit", False))
+FEATURE_PARTIAL_TAKE_PROFIT: bool  = bool(_F.get("enable_partial_take_profit", False))
+FEATURE_MARKET_FILTER: bool        = bool(_F.get("enable_market_filter", False))
+
+STRATEGY_VERSION: str = "v1_pathd"
