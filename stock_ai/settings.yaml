@@ -1,0 +1,45 @@
+# デイトレ判定ロジックの設定値。
+# ここを編集するだけでコードを直接修正せずに判定条件を変更できます。
+# このファイルがない場合や項目が不足している場合は、config.py 内のデフォルト値が使われます。
+
+trade_decision:
+  stop_loss_pct: -2                      # 損切りライン（%）。これ以下が2本連続でSTOP_LOSS
+  take_profit_pct: 5                     # 利確ライン（%）。到達後はトレーリングストップ監視に切り替わる
+  take_profit_trail_pct: 2                # 利確ライン到達後、当日ピーク損益率からこのpt以上戻したらTAKE_PROFIT確定
+  bar_change_strong_pct: 4                # 急騰・急落判定（%）。5分足1本の変化率がこれ以上/以下でWATCH_STRONG
+  abnormal_volume_ratio: 5                # 出来高急増倍率。直近出来高が6本平均のこの倍数以上でWATCH_STRONG
+  confirm_bars: 2                         # STOP_LOSS/TAKE_PROFIT確定に必要な連続本数
+  volume_decline_ratio: 0.7               # 出来高減少フラグ判定比率（volume_ma3 < volume_ma6 * この値）
+  volume_surge_continuation_ratio: 1.5    # 出来高急増継続判定比率（volume_ma3/volume_ma12 がこの値以上）
+  volume_fading_ratio: 0.7                # 出来高失速判定比率（volume_ma3/volume_ma12 がこの値未満）
+  vwap_near_pct: 0.01                     # VWAP接近判定（1% = 0.01）
+  atr_period: 14                          # ATR計算に使う本数
+  atr_stop_multiplier: 2                  # ATR損切りライン = entry_price - atr_14 * この値
+  atr_near_pct: 0.01                      # ATR損切りライン接近判定（1% = 0.01）
+  min_bars_for_atr: 2                     # ATR計算に必要な最低本数
+  opening_range_start: "09:00"            # 寄り付き30分レンジの開始時刻
+  opening_range_end: "09:30"              # 寄り付き30分レンジの終了時刻
+  entry_score_rank_threshold: 10          # 注目銘柄ランキングの「上位」とみなす順位
+  entry_score_threshold: 85               # ENTRY_SCOREがこの値以上で買いエントリー候補=ENTRY
+  watch_candidate_threshold: 70           # ENTRY_SCOREがこの値以上(ENTRY未満)で買いエントリー候補=WATCH
+  buy_score_threshold: 85                 # final_action=BUY判定に必要なENTRY_SCOREの最低値
+  notify_final_action_buy: true           # final_action=BUY（変化時）をLINE通知するか
+  notify_final_action_sell: true          # final_action=SELL（変化時）をLINE通知するか
+
+  entry_score_points:                     # ENTRY_SCORE（compute_entry_score）の配点
+    vwap_above: 20                        # 現在価格がVWAPより上
+    prev_high_breakout: 20                # 前日高値ブレイク
+    opening_range_breakout: 20            # 寄り付き30分高値ブレイク
+    volume_surge_continuation: 20         # 出来高急増継続
+    ranking_top: 15                       # 未使用（rank_1_3/4_5/6_10 の段階加点に置換済み。後方互換用に残置）
+    market_bull: 5                        # 地合いが「普通」または「強い」
+    market_bear_penalty: -15              # 地合いが「悪い」場合の減点
+    rank_1_3: 15                          # 注目銘柄ランキング1〜3位の加点
+    rank_4_5: 12                          # 注目銘柄ランキング4〜5位の加点
+    rank_6_10: 10                         # 注目銘柄ランキング6〜10位の加点
+
+monitoring:
+  time_limit: "15:20"                     # この時刻を過ぎたら監視終了（TIME_LIMIT）
+
+notification:
+  duplicate_suppress_window_minutes: 30   # 同一銘柄・同一シグナルのLINE通知抑制時間（分）

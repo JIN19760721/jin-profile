@@ -1,0 +1,100 @@
+trade:
+  capital: 100000               # 運用資金（円）
+  order_qty: 100                # 1回あたりの発注株数
+  max_positions: 5              # 最大同時保有銘柄数
+  min_stock_price: 100          # 最低株価（円）。呼値1円が%ベースの損切り/利確ラインに対して
+                                 # 粗くなりすぎる超低位株（例: 50円=呼値だけで2%相当）を除外する
+  take_profit_trailing_pct: 3.0    # キープゾーン中に高値からこれだけ押したら強制利確
+  # 利益ロック（take_profit_pct_d到達前の無防備地帯対策）
+  # 高値時点の含み益が take_profit_pct_d * trigger_ratio に達したら防御ラインを引き上げる
+  profit_lock_breakeven_trigger_ratio: 0.40  # ブレークイーブン確保の発動比率
+  profit_lock_breakeven_floor_pct: 0.5       # ブレークイーブン確保時の下限（%）
+  profit_lock_partial_trigger_ratio: 0.5     # 部分トレーリング開始の発動比率
+  profit_lock_partial_trail_pct: 2.0         # 部分トレーリングの許容押し幅（高値からのpt）
+  # 低位株では呼び値1枚の値動きだけで上記%閾値を超えてしまい、板ノイズと
+  # 本物のトレンド転換を区別できない（例: 120円銘柄は呼び値1枚=0.83%）。
+  # 呼び値ベースの最低ティック数を下限として床の実効幅を確保する。
+  profit_lock_breakeven_min_ticks: 2         # ブレークイーブン床の最低ティック数
+  profit_lock_partial_trail_min_ticks: 5     # 部分トレーリング床の最低ティック数
+  # 停滞タイムアウト（出来高急増後に価格が追随せず停滞したまま長時間経過した場合の早期撤退）
+  stall_timeout_min: 15            # この分数経過してもピークが伸びなければ対象
+                                    # (旧30分。過去のSTALL_TIMEOUT該当10件は決済後も終日1.2%超の
+                                    # 動きが一度もなく、30分では長すぎる可能性が高いため短縮。
+                                    # ただし勝ちトレードの立ち上がり速度は観測ログ不足で未検証のため、
+                                    # 15分後も要経過観察)
+  stall_peak_threshold_pct: 1.0    # ピーク含み益がこの%未満なら「停滞」とみなす
+  order_timeout_minutes: 3      # 指値注文タイムアウト（未約定でキャンセル）
+  polling_interval_seconds: 60  # 新規エントリー探索（ランキング取得・surge評価）の間隔
+  position_check_interval_seconds: 10  # 保有ポジションの損切り/利確監視の間隔（60秒だと損切りラインの超過が大きくなるため）
+  pre_market_yfinance_time: "08:00" # yfinance 前日データによる事前スキャン時刻
+  pre_market_scan_time: "08:57" # kabu station ランキングによる寄り付き前スキャン時刻
+  # Claude 寄り付き前フィルタ（気配値ベース、pre_market_yfinance と pre_market_scan の間で実行）
+  pre_market_llm_enabled: true          # false でこの機能を無効化（無効時・失敗時は候補をそのまま使用＝フェイルオープン）
+  pre_market_llm_time: "08:50"          # 実行時刻（気配は9:00に近いほど信頼性が上がるが、08:57のkabuスキャンより前に終える必要がある）
+  pre_market_llm_model: "claude-opus-4-8"
+  pre_market_llm_universe_size: 25      # Claudeに提示する候補数（score上位から）
+  pre_market_llm_top_n: 10              # Claudeに選ばせる件数
+  # エントリー直前のClaude最終確認（経路D）: バッチ定期再評価（旧方式、削除済み）は
+  # レビューのタイミングとエントリーのタイミングがズレる問題があったため、
+  # 条件を満たした候補1件だけをその場で確認する方式に変更。フェイルオープン。
+  entry_llm_check_enabled: true
+  # TDnet適時開示の加味（非公式スクレイピング。失敗時はフェイルオープンで開示情報なし継続）
+  pre_market_llm_disclosure_enabled: true      # false でこの機能のみ無効化
+  pre_market_llm_disclosure_after_hour: 15     # 前営業日のこの時刻以降の開示を「引け後」として加味
+  pre_market_llm_disclosure_max_extras: 15     # モメンタム候補外から開示のみで補完する銘柄数の上限
+  watch_advisor_model: "claude-opus-4-8"       # ウォッチリスト買い時・売り時アドバイス（--advise）で使うモデル
+  force_close_time: "15:00"     # 強制全ポジション決済時刻
+  force_close_confirm_timeout_min: 20  # 強制クローズ後、約定確定を待つ最大時間（分）
+  force_close_discount_window_min: 5   # 上記のうち、終盤この分数は値引きモードで再発注する
+  force_close_discount_pct: 0.3        # 値引きモード中の指値の値引き幅（%）
+  daily_loss_limit: -30000      # 日次損失上限（円）。超過したら新規発注停止
+  reentry_cooldown_minutes: 60  # 同一銘柄を当日決済後、再エントリーまでの待機時間（分）。0で無効
+  allow_same_day_reentry: false # 現物取引の差金決済制限が未確認のため、同一銘柄は1日1往復までに制限（安全側）
+                                 # auカブコム証券で同日複数回売買が可能と確認できたら true に変更する
+  cash_margin: 1                # 1=現物, 2=信用
+  account_type: 4               # 4=特定口座
+  exchange: "T"                 # 取引所フィルタ（東証全体=プライム+スタンダード+グロース。低位株の発見機会を増やすためプライム限定から拡大）
+  trading_sessions:
+    - start: "09:00"
+      end:   "11:30"
+    - start: "12:30"
+      end:   "15:20"
+  entry_embargo_minutes: 5      # 各セッション開始直後の様子見期間（分）。0で無効。
+                                 # 経路D（出来高先行エントリー）は早期入場が有利なため15分→5分に短縮。
+                                 # 5分あれば price_cache（1分足履歴）が安定し surge_score の計算精度が確保できる。
+
+surge:
+  surge_strong_score: 85.0      # SURGE_STRONG 閾値
+  surge_candidate_score: 70.0   # SURGE_CANDIDATE 閾値
+  surge_watch_score: 50.0       # SURGE_WATCH 閾値
+  surge_notify_delta: 10.0      # この値以上変化した場合のみ LINE 通知
+  surge_notify_enabled: false   # surge 通知を無効化（LINE月200通上限節約）
+  surge_hist_days: 20           # 急増率の比較基準となる過去日数
+  order_price_buffer_pct: 0.0   # 発注価格バッファ（%）。経路DはPRE_SURGE_SETUP（価格未動）を狙うため
+                                 # 急騰中の未約定防止という当初の目的が当てはまらず、片道コストのみが
+                                 # 乗っていた（過去実績で実現利益の約43%を消費）ため0に変更。
+
+entry_policy:
+  enabled: true
+  hourly_ma_short: 5
+  hourly_ma_long: 20
+  rci_period: 9  # watch_advisor.py の RCI 表示で使用
+
+# V2設計書（日本株デイトレード支援システムV2.0）Feature Flag。
+# Phase0（計測基盤）のみtrueで導入。他は全てfalseのまま据え置き、
+# 既存の経路D・surge_score・PRE_SURGE_SETUP等の売買判定を一切変更しない。
+# Phase1以降を有効化する際は、まずshadow modeで検証してから段階的にONにする。
+features:
+  enable_phase0_observability: true   # signal_history/candidate_outcomes記録（観測専用、売買判定に影響しない）
+  enable_rr_filter: false
+  enable_entry_score_v2: false
+  enable_opening_range: false
+  enable_breakout_pattern: false
+  enable_pullback_pattern: false
+  enable_vwap_reclaim: false
+  enable_price_structure: false
+  enable_time_bucket_filter: false
+  enable_orderbook_filter: false
+  enable_r_based_exit: false
+  enable_partial_take_profit: false
+  enable_market_filter: false

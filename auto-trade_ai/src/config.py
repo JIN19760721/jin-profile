@@ -1,0 +1,220 @@
+import os
+from pathlib import Path
+
+import yaml
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).parent.parent / ".env")
+
+API_PASSWORD: str = os.getenv("API_PASSWORD", "")
+KABU_ENV: str = os.getenv("KABU_ENV", "test").lower()
+EXCHANGE_DIVISION: str = os.getenv("EXCHANGE_DIVISION", "TP")
+
+BASE_URL: str = (
+    "http://localhost:18080/kabusapi"
+    if KABU_ENV == "prod"
+    else "http://localhost:18081/kabusapi"
+)
+
+MIN_TRADING_VOLUME: int = int(os.getenv("MIN_TRADING_VOLUME", "10000"))
+
+RANKING_TYPES: list[int] = [1, 6, 7]
+
+SCORE_PRICE_CHANGE: int = 25
+SCORE_VOLUME:       int = 25
+SCORE_TURNOVER:     int = 30
+
+# 取引関連
+ORDER_PASSWORD: str = os.getenv("ORDER_PASSWORD", "")
+LINE_CHANNEL_ACCESS_TOKEN: str = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
+LINE_USER_ID: str = os.getenv("LINE_USER_ID", "")
+NTFY_TOPIC: str = os.getenv("NTFY_TOPIC", "")
+NTFY_URL: str = os.getenv("NTFY_URL", "https://ntfy.sh")
+TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
+ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
+
+DB_PATH: Path = Path(__file__).parent.parent / "data" / "trades.db"
+
+
+def load_settings() -> dict:
+    path = Path(__file__).parent.parent / "settings.yaml"
+    if not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+def _get(settings: dict, *keys, default=None):
+    d = settings
+    for k in keys:
+        if not isinstance(d, dict):
+            return default
+        d = d.get(k, default)
+    return d
+
+
+_SETTINGS = load_settings()
+_T = _SETTINGS.get("trade", {})
+_E = _SETTINGS.get("entry_policy", {})
+_S = _SETTINGS.get("surge", {})
+
+CAPITAL: float              = float(_T.get("capital", 100000))
+ORDER_QTY: int              = int(_T.get("order_qty", 100))
+MAX_POSITIONS: int          = int(_T.get("max_positions", 5))
+# 呼値（最小値幅）が%ベースの損切り/利確ラインに対して粗くなりすぎる超低位株を除外する
+MIN_STOCK_PRICE: float      = float(_T.get("min_stock_price", 100))
+STOP_LOSS_PCT: float             = float(_T.get("stop_loss_pct", -3.0))
+TAKE_PROFIT_PCT: float           = float(_T.get("take_profit_pct", 8.0))
+TAKE_PROFIT_RCI_THRESHOLD: float = float(_T.get("take_profit_rci_threshold", 80.0))
+TAKE_PROFIT_TRAILING_PCT: float  = float(_T.get("take_profit_trailing_pct", 3.0))
+# 利益ロック（tp_pct到達前の無防備地帯対策）: tp_pctに対する比率でトリガーが決まる
+PROFIT_LOCK_BREAKEVEN_TRIGGER_RATIO: float = float(_T.get("profit_lock_breakeven_trigger_ratio", 0.25))
+PROFIT_LOCK_BREAKEVEN_FLOOR_PCT: float     = float(_T.get("profit_lock_breakeven_floor_pct", 0.5))
+PROFIT_LOCK_PARTIAL_TRIGGER_RATIO: float   = float(_T.get("profit_lock_partial_trigger_ratio", 0.5))
+PROFIT_LOCK_PARTIAL_TRAIL_PCT: float       = float(_T.get("profit_lock_partial_trail_pct", 2.0))
+# 低位株では呼び値1枚の値動きだけで上記%閾値を超えてしまい、本物のトレンド転換と
+# 板ノイズを区別できない（例: 120円銘柄は呼び値1枚=0.83%）。呼び値ベースの
+# 最低ティック数を下限として、床の実効幅がそれを下回らないようにする。
+PROFIT_LOCK_BREAKEVEN_MIN_TICKS: int       = int(_T.get("profit_lock_breakeven_min_ticks", 2))
+PROFIT_LOCK_PARTIAL_TRAIL_MIN_TICKS: int   = int(_T.get("profit_lock_partial_trail_min_ticks", 5))
+# 停滞タイムアウト: 保有stall_timeout_min分経過してもピーク含み益がstall_peak_threshold_pct%に
+# 届かない（出来高急増後に価格が追随しないまま停滞している）場合、損切りラインを待たずに撤退する
+STALL_TIMEOUT_MIN: float          = float(_T.get("stall_timeout_min", 30))
+STALL_PEAK_THRESHOLD_PCT: float   = float(_T.get("stall_peak_threshold_pct", 1.0))
+ORDER_TIMEOUT_MIN: int      = int(_T.get("order_timeout_minutes", 3))
+POLLING_INTERVAL: int       = int(_T.get("polling_interval_seconds", 60))
+# 保有ポジションの損切り/利確監視の間隔（新規エントリー探索より高頻度に回す）
+POSITION_CHECK_INTERVAL_SEC: int = int(_T.get("position_check_interval_seconds", 10))
+PRE_MARKET_YFINANCE_TIME: str = str(_T.get("pre_market_yfinance_time", "08:00"))
+PRE_MARKET_SCAN_TIME: str   = str(_T.get("pre_market_scan_time", "08:45"))
+# Claude 寄り付き前フィルタ（気配値ベース）
+PRE_MARKET_LLM_ENABLED: bool       = bool(_T.get("pre_market_llm_enabled", True))
+PRE_MARKET_LLM_TIME: str           = str(_T.get("pre_market_llm_time", "08:30"))
+PRE_MARKET_LLM_MODEL: str          = str(_T.get("pre_market_llm_model", "claude-opus-4-8"))
+PRE_MARKET_LLM_UNIVERSE_SIZE: int  = int(_T.get("pre_market_llm_universe_size", 25))
+PRE_MARKET_LLM_TOP_N: int          = int(_T.get("pre_market_llm_top_n", 10))
+# エントリー直前のClaude最終確認（経路D）: 条件を満たした候補1件のみをその場で
+# 評価する。PRE_SURGE_SETUP自体が「価格未動」を前提とするため、応答待ちの
+# 数秒が実害になりにくい。失敗時はフェイルオープン（Claude抜きで発注続行）。
+ENTRY_LLM_CHECK_ENABLED: bool = bool(_T.get("entry_llm_check_enabled", True))
+# TDnet適時開示の加味（非公式スクレイピング。失敗時はフェイルオープンで開示情報なし継続）
+PRE_MARKET_LLM_DISCLOSURE_ENABLED: bool     = bool(_T.get("pre_market_llm_disclosure_enabled", True))
+# 前営業日の何時以降を「引け後の開示」として翌朝の判断材料に含めるか
+PRE_MARKET_LLM_DISCLOSURE_AFTER_HOUR: int   = int(_T.get("pre_market_llm_disclosure_after_hour", 15))
+# モメンタム候補外から開示のみで追加補完する銘柄数の上限
+PRE_MARKET_LLM_DISCLOSURE_MAX_EXTRAS: int   = int(_T.get("pre_market_llm_disclosure_max_extras", 15))
+# ウォッチリスト買い時・売り時アドバイス（--advise）
+WATCH_ADVISOR_MODEL: str    = str(_T.get("watch_advisor_model", "claude-opus-4-8"))
+CLAUDE_TP_MODEL: str        = str(_T.get("claude_tp_model", "claude-haiku-4-5-20251001"))
+FORCE_CLOSE_TIME: str       = str(_T.get("force_close_time", "15:20"))
+# 強制クローズ後の約定確認待ち（終盤discount_window_min分は指値をdiscount_pct%値引きして再発注）
+FORCE_CLOSE_CONFIRM_TIMEOUT_MIN: float = float(_T.get("force_close_confirm_timeout_min", 10))
+FORCE_CLOSE_DISCOUNT_WINDOW_MIN: float = float(_T.get("force_close_discount_window_min", 0))
+FORCE_CLOSE_DISCOUNT_PCT: float        = float(_T.get("force_close_discount_pct", 0.0))
+MIN_SCORE_TO_ENTER: float   = float(_T.get("min_score_to_enter", 60.0))
+DAILY_LOSS_LIMIT: float     = float(_T.get("daily_loss_limit", -30000))
+# 同一銘柄を当日決済後、再エントリーまでの待機時間（分）。0で無効
+REENTRY_COOLDOWN_MIN: int   = int(_T.get("reentry_cooldown_minutes", 60))
+# 現物取引は差金決済（当日売却代金での同一銘柄同日再買付）が証券会社によって
+# 制限される場合がある。未確認の間は安全側に倒し、同一銘柄は1日1往復までとする。
+# auカブコム証券で同日複数回売買が可能と確認できたら true にする。
+ALLOW_SAME_DAY_REENTRY: bool = bool(_T.get("allow_same_day_reentry", False))
+CASH_MARGIN: int            = int(_T.get("cash_margin", 1))
+ACCOUNT_TYPE: int           = int(_T.get("account_type", 4))
+TRADING_SESSIONS: list      = _T.get("trading_sessions", [{"start": "09:00", "end": "09:30"}])
+# 各セッション開始直後は板が薄く反転しやすいため、この分数だけ新規エントリーを見送る（0で無効）
+ENTRY_EMBARGO_MIN: int      = int(_T.get("entry_embargo_minutes", 15))
+TRADE_EXCHANGE: str         = str(_T.get("exchange", EXCHANGE_DIVISION))
+
+ENTRY_POLICY_ENABLED: bool  = bool(_E.get("enabled", True))
+HOURLY_MA_SHORT: int        = int(_E.get("hourly_ma_short", 5))
+HOURLY_MA_LONG: int         = int(_E.get("hourly_ma_long", 20))
+MIN1_MA_PERIOD: int         = int(_E.get("min1_ma_period", 5))
+RCI_PERIOD: int             = int(_E.get("rci_period", 9))
+RCI_APPROACH_THRESHOLD: float = float(_E.get("rci_approach_threshold", -80))
+RCI_LOOKBACK_BARS: int      = int(_E.get("rci_lookback_bars", 10))
+
+# ── 急騰予兆スコア ───────────────────────────────────────────────────────────
+USE_SURGE_SCORE_FILTER: bool  = _S.get("use_surge_score_filter", True)
+MIN_SURGE_SCORE: float        = float(_S.get("min_surge_score", 70.0))
+SURGE_STRONG_SCORE: float     = float(_S.get("surge_strong_score", 85.0))
+SURGE_CANDIDATE_SCORE: float  = float(_S.get("surge_candidate_score", 70.0))
+SURGE_WATCH_SCORE: float      = float(_S.get("surge_watch_score", 50.0))
+SURGE_NOTIFY_DELTA: float     = float(_S.get("surge_notify_delta", 10.0))
+SURGE_NOTIFY_ENABLED: bool    = bool(_S.get("surge_notify_enabled", True))
+# 急騰候補通知: シグナルが上位ステータスに遷移したときのみ通知する（維持中はdeltaのみ）
+SURGE_NOTIFY_ON_TRANSITION_ONLY: bool = bool(_S.get("surge_notify_on_transition_only", True))
+# エントリー直前アラート通知（confirm_min-1 回目に達した銘柄）
+PRE_ENTRY_NOTIFY_ENABLED: bool = bool(_S.get("pre_entry_notify_enabled", False))
+SURGE_HIST_DAYS: int          = int(_S.get("surge_hist_days", 20))
+# 経路B: surge主導バイパス条件
+SURGE_BYPASS_MIN_SURGE: float = float(_S.get("bypass_min_surge", 85.0))
+SURGE_BYPASS_MIN_SCORE: float = float(_S.get("bypass_min_score", 40.0))
+# 経路D: 出来高先行エントリー（PRE_SURGE_SETUP）
+PATHD_ENABLED: bool           = bool(_S.get("pathd_enabled", True))
+PATHD_MIN_VOLUME_SPIKE: float = float(_S.get("pathd_min_volume_spike", 2.5))
+PATHD_CONFIRM_MIN: int        = int(_S.get("pathd_confirm_min", 2))
+# 発注価格バッファ（急騰中の未約定防止）
+ORDER_PRICE_BUFFER_PCT: float = float(_S.get("order_price_buffer_pct", 0.3))
+# 経路C: score不問のsurge純粋選出
+PATHC_ENABLED: bool           = bool(_S.get("pathc_enabled", True))
+PATHC_MIN_SURGE: float        = float(_S.get("pathc_min_surge", 92.0))
+# surge 連続確認: この回数連続で閾値超えした場合のみエントリー許可（誤エントリー防止）
+SURGE_CONFIRM_MIN: int        = int(_S.get("confirm_min", 2))
+
+# 経路別出口条件
+STOP_LOSS_PCT_B: float        = float(_T.get("stop_loss_pct_b",  -2.0))
+TAKE_PROFIT_PCT_B: float      = float(_T.get("take_profit_pct_b",  5.0))
+STOP_LOSS_PCT_C: float        = float(_T.get("stop_loss_pct_c",  -1.5))
+TAKE_PROFIT_PCT_C: float      = float(_T.get("take_profit_pct_c",  3.0))
+# 経路D: 出来高蓄積主導（PRE_SURGE_SETUP）— 価格が動く前にエントリーして急騰を待つ
+STOP_LOSS_PCT_D: float        = float(_T.get("stop_loss_pct_d",  -2.0))
+TAKE_PROFIT_PCT_D: float      = float(_T.get("take_profit_pct_d",  5.0))
+
+# ── リアルタイムモニター ─────────────────────────────────────────────────────
+_M = _SETTINGS.get("monitor", {})
+
+WS_URL: str                    = str(_M.get("ws_url", "ws://localhost:18080/kabusapi/websocket"))
+MONITOR_MAX_SYMBOLS: int       = int(_M.get("max_symbols", 50))
+MONITOR_REFRESH_SEC: int       = int(_M.get("refresh_seconds", 10))
+MONITOR_RESCAN_MIN: int        = int(_M.get("rescan_minutes", 5))
+MONITOR_TOP_N: int             = int(_M.get("top_n", 50))
+MONITOR_EXCHANGE: str          = str(_M.get("exchange", EXCHANGE_DIVISION))
+WS_RECONNECT_DELAY: int        = int(_M.get("reconnect_delay_seconds", 5))
+
+# ENTRY_SCORE スコアリング配点（合計100点）
+SCORE_BUY_DOMINANCE: int       = int(_M.get("score_buy_dominance", 25))
+SCORE_IMBALANCE: int           = int(_M.get("score_imbalance", 20))
+SCORE_EXPECTED_CHANGE: int     = int(_M.get("score_expected_change", 20))
+SCORE_VOLUME_SURGE: int        = int(_M.get("score_volume_surge", 15))
+SCORE_VWAP_DEVIATION: int      = int(_M.get("score_vwap_deviation", 15))
+SCORE_FLUCTUATION: int         = int(_M.get("score_fluctuation", 5))
+
+# シグナル閾値
+SIGNAL_ENTRY: int              = int(_M.get("signal_entry", 85))
+SIGNAL_WATCH_STRONG: int       = int(_M.get("signal_watch_strong", 70))
+SIGNAL_WATCH: int              = int(_M.get("signal_watch", 55))
+
+# 出来高急増率の基準（1日あたりの平均出来高の推定値：株数）
+BASELINE_DAILY_VOLUME: int     = int(_M.get("baseline_daily_volume", 1_000_000))
+
+# ── V2設計書（日本株デイトレード支援システムV2.0）Feature Flag ──────────────────
+# Phase0（計測基盤）以外は全てfalseで導入し、既存の売買判定には一切影響しない。
+_F = _SETTINGS.get("features", {})
+
+FEATURE_PHASE0_OBSERVABILITY: bool = bool(_F.get("enable_phase0_observability", True))
+FEATURE_RR_FILTER: bool            = bool(_F.get("enable_rr_filter", False))
+FEATURE_ENTRY_SCORE_V2: bool       = bool(_F.get("enable_entry_score_v2", False))
+FEATURE_OPENING_RANGE: bool        = bool(_F.get("enable_opening_range", False))
+FEATURE_BREAKOUT_PATTERN: bool     = bool(_F.get("enable_breakout_pattern", False))
+FEATURE_PULLBACK_PATTERN: bool     = bool(_F.get("enable_pullback_pattern", False))
+FEATURE_VWAP_RECLAIM: bool         = bool(_F.get("enable_vwap_reclaim", False))
+FEATURE_PRICE_STRUCTURE: bool      = bool(_F.get("enable_price_structure", False))
+FEATURE_TIME_BUCKET_FILTER: bool   = bool(_F.get("enable_time_bucket_filter", False))
+FEATURE_ORDERBOOK_FILTER: bool     = bool(_F.get("enable_orderbook_filter", False))
+FEATURE_R_BASED_EXIT: bool         = bool(_F.get("enable_r_based_exit", False))
+FEATURE_PARTIAL_TAKE_PROFIT: bool  = bool(_F.get("enable_partial_take_profit", False))
+FEATURE_MARKET_FILTER: bool        = bool(_F.get("enable_market_filter", False))
+
+STRATEGY_VERSION: str = "v1_pathd"
