@@ -185,6 +185,9 @@ class TradeEngine:
         self._llm_entry_checked: dict[str, tuple[bool, str]] = {}
         # V2設計書Phase0観測用: 本日すでにcandidate_outcomesへ記録済みのsymbol → candidate_id
         self._candidate_ids_today: dict[str, str] = {}
+        # V2設計書Phase0観測用: 本日entered=1を記録済みのsymbol（決済後の再候補出現による
+        # entered=0への上書きを防ぐガード。売買判定には無関係、observability専用）
+        self._candidate_entered_today: set[str] = set()
         # エントリー直前通知済みセット（同一銘柄の重複通知防止）
         self._pre_entry_notified: set[str] = set()
         db.init_db(DB_PATH)
@@ -522,10 +525,13 @@ class TradeEngine:
             if not FEATURE_PHASE0_OBSERVABILITY:
                 return
             cid = self._candidate_ids_today.get(symbol)
-            if cid:
+            already_entered = symbol in self._candidate_entered_today
+            if cid and not (already_entered and not entered):
                 db.update_candidate_outcome(cid, {
                     "entered": int(entered), "no_entry_reason": no_entry_reason,
                 })
+            if entered:
+                self._candidate_entered_today.add(symbol)
             signal_repository.record_entry_decision(
                 symbol, c.get("board_price") or c.get("current_price"),
                 c.get("surge_score"), one_hour_trend=None,
