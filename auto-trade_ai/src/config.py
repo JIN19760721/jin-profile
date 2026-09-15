@@ -104,6 +104,14 @@ PRE_MARKET_LLM_DISCLOSURE_ENABLED: bool     = bool(_T.get("pre_market_llm_disclo
 PRE_MARKET_LLM_DISCLOSURE_AFTER_HOUR: int   = int(_T.get("pre_market_llm_disclosure_after_hour", 15))
 # モメンタム候補外から開示のみで追加補完する銘柄数の上限
 PRE_MARKET_LLM_DISCLOSURE_MAX_EXTRAS: int   = int(_T.get("pre_market_llm_disclosure_max_extras", 15))
+# 翌日仕込み候補アドバイザー: 15:15頃（東証引け前）に当日の値動き・出来高データと
+# TDnet開示（PRE_MARKET_LLM_DISCLOSURE_*を共用）から翌日に向けて仕込む価値がありそうな
+# 銘柄をClaudeに選ばせ、LINE通知するだけの助言専用機能。自動発注・自動EXITは行わない。
+OVERNIGHT_ADVISOR_ENABLED: bool       = bool(_T.get("overnight_advisor_enabled", True))
+OVERNIGHT_ADVISOR_TIME: str           = str(_T.get("overnight_advisor_time", "15:15"))
+OVERNIGHT_ADVISOR_MODEL: str          = str(_T.get("overnight_advisor_model", "claude-opus-4-8"))
+OVERNIGHT_ADVISOR_UNIVERSE_SIZE: int  = int(_T.get("overnight_advisor_universe_size", 25))
+OVERNIGHT_ADVISOR_TOP_N: int          = int(_T.get("overnight_advisor_top_n", 10))
 # ウォッチリスト買い時・売り時アドバイス（--advise）
 WATCH_ADVISOR_MODEL: str    = str(_T.get("watch_advisor_model", "claude-opus-4-8"))
 CLAUDE_TP_MODEL: str        = str(_T.get("claude_tp_model", "claude-haiku-4-5-20251001"))

@@ -103,6 +103,18 @@ def notify_llm_premarket_picks(selected: dict[str, str], dry_run: bool = False) 
         send(text[i:i + chunk_size], dry_run=dry_run, title="Claude寄り付き前フィルタ")
 
 
+def notify_overnight_picks(selected: dict[str, str], dry_run: bool = False) -> None:
+    """翌日仕込み候補アドバイザーの選定結果を通知する（助言専用、自動発注は行わない）。"""
+    if not selected:
+        lines = ["該当銘柄なし"]
+    else:
+        lines = [f"{sym}: {reason}" for sym, reason in selected.items()]
+    text = "\n".join(lines)
+    chunk_size = 4000
+    for i in range(0, len(text), chunk_size):
+        send(text[i:i + chunk_size], dry_run=dry_run, title="翌日仕込み候補（Claude）")
+
+
 def notify_watch_advice(advices: list[dict], dry_run: bool = False) -> None:
     """ウォッチリスト銘柄の買い時・売り時アドバイスを通知する。"""
     if not advices:

@@ -28,6 +28,8 @@ from src.config import (
     FEATURE_PHASE1_TRADE_PLAN,
     ORDER_PRICE_BUFFER_PCT,
     ORDER_QTY,
+    OVERNIGHT_ADVISOR_ENABLED,
+    OVERNIGHT_ADVISOR_TIME,
     PATHD_ENABLED,
     PATHD_MIN_VOLUME_SPIKE,
     PATHD_CONFIRM_MIN,
@@ -45,6 +47,7 @@ from src.config import (
     TRADING_SESSIONS,
 )
 from src import premarket_llm_filter
+from src import overnight_llm_advisor
 from src import entry_llm_check
 from src import signal_repository
 from src import price_structure_fetch
@@ -198,6 +201,8 @@ class TradeEngine:
         self._trade_plans_today: dict[str, TradePlan] = {}
         # エントリー直前通知済みセット（同一銘柄の重複通知防止）
         self._pre_entry_notified: set[str] = set()
+        # 翌日仕込み候補アドバイザー: 1日1回のみ実行するためのフラグ（助言専用、売買判定とは無関係）
+        self._overnight_advisor_done: bool = False
         db.init_db(DB_PATH)
 
     def run(self) -> None:
@@ -242,6 +247,7 @@ class TradeEngine:
                 if tick_count % ticks_per_scan == 0:
                     self._pt.refresh_claude_judgments()
                     self._tick_entries()
+                    self._maybe_run_overnight_advisor()
                 time.sleep(POSITION_CHECK_INTERVAL_SEC)
         except KeyboardInterrupt:
             log.info("手動中断を検出しました。")
@@ -289,6 +295,29 @@ class TradeEngine:
                 log.warning("yfinance 事前スキャン: 候補なし")
         except Exception as e:
             log.error("yfinance 事前スキャン 失敗: %s", e)
+
+    def _maybe_run_overnight_advisor(self) -> None:
+        """翌日仕込み候補アドバイザーを1日1回、OVERNIGHT_ADVISOR_TIME（既定15:15）以降に実行する。
+
+        助言専用（自動発注・自動EXITなし）。売買判定フローとは完全に独立しており、
+        ここで例外が起きてもメインループには一切影響させない（フェイルオープン）。
+        premarket系の _run_llm_premarket_filter と異なり、これは常時ループの中で
+        毎tick呼ばれる想定のため、時刻未到達なら即returnするだけで待機はしない。
+        """
+        if not OVERNIGHT_ADVISOR_ENABLED or self._overnight_advisor_done:
+            return
+
+        now_min = _hhmm_to_minutes(*_now_hhmm())
+        target_min = _hhmm_to_minutes(*_parse_hhmm(OVERNIGHT_ADVISOR_TIME))
+        if now_min < target_min:
+            return
+
+        self._overnight_advisor_done = True
+        log.info("=== 翌日仕込み候補アドバイザー開始 ===")
+        try:
+            overnight_llm_advisor.run(dry_run=self.dry_run)
+        except Exception as e:
+            log.warning("翌日仕込み候補アドバイザー 失敗（無視して継続します）: %s", e)
 
     def _run_llm_premarket_filter(self) -> None:
         """Claude による寄り付き前フィルタ（気配値ベース）を実行する。
