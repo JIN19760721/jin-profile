@@ -167,11 +167,34 @@ def init_db(db_path: Path = DB_PATH) -> None:
             created_at        TEXT NOT NULL,
             PRIMARY KEY (date, strategy_version)
         );
+
+        -- Phase1（V2設計書, Shadow Mode）: trade_plan（STOP/TARGET/RR）の記録。
+        -- 観測専用テーブル。ここでのrr_verdictは売買判定には一切使用しない。
+        -- 実際の値動き・MFE/MAEはcandidate_id経由でcandidate_outcomesをJOINして得る。
+
+        CREATE TABLE IF NOT EXISTS trade_plans (
+            candidate_id       TEXT PRIMARY KEY,
+            symbol             TEXT NOT NULL,
+            signal_time        TEXT NOT NULL,
+            entry_price        REAL,
+            stop_price         REAL,
+            stop_reason        TEXT,
+            target_price       REAL,
+            target_reason      TEXT,
+            risk_per_share     REAL,
+            reward_per_share   REAL,
+            risk_reward_ratio  REAL,
+            rr_verdict         TEXT,
+            strategy_version   TEXT NOT NULL DEFAULT 'v1_pathd'
+        );
+        CREATE INDEX IF NOT EXISTS idx_trade_plans_symbol
+            ON trade_plans(symbol, signal_time);
         """)
         # 既存 DB への列追加マイグレーション
         _migrate_daily_candidates(conn)
         _migrate_orders(conn)
         _migrate_positions(conn)
+        _migrate_positions_tradeplan(conn)
         # symbol UNIQUE 制約の除去（entry_path 列が保証された後に実行する必要がある）
         _migrate_positions_drop_symbol_unique(conn)
         # OPEN ポジションは銘柄×dry_run につき1件までを保証する（履歴は複数保持可能）
@@ -232,6 +255,11 @@ def _migrate_orders(conn: sqlite3.Connection) -> None:
     for col, typ in _ENTRY_SIGNAL_COLUMNS:
         if col not in existing:
             conn.execute(f"ALTER TABLE orders ADD COLUMN {col} {typ}")
+    # V2設計書 Phase1（Shadow Mode）: trade_planスナップショット。約定確認時に
+    # ordersから読み出してpositionsへコピーするため、positionsと同じ列名で持たせる。
+    for col, typ in _TRADE_PLAN_POSITION_COLUMNS:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE orders ADD COLUMN {col} {typ}")
 
 
 def _migrate_positions(conn: sqlite3.Connection) -> None:
@@ -246,6 +274,31 @@ def _migrate_positions(conn: sqlite3.Connection) -> None:
     for col, typ, default in _CLOSING_COLUMNS:
         if col not in existing:
             conn.execute(f"ALTER TABLE positions ADD COLUMN {col} {typ} DEFAULT {default}")
+
+
+_TRADE_PLAN_POSITION_COLUMNS = [
+    ("stop_price_initial",   "REAL"),
+    ("target_price_initial", "REAL"),
+    ("risk_reward_ratio",    "REAL"),
+    ("stop_reason",          "TEXT"),
+    ("target_reason",        "TEXT"),
+    ("initial_risk",         "REAL"),
+    ("entry_pattern",        "TEXT"),
+    ("strategy_version",     "TEXT"),
+]
+
+
+def _migrate_positions_tradeplan(conn: sqlite3.Connection) -> None:
+    """V2設計書 Phase1（Shadow Mode）: positionsにtrade_planスナップショット列を追加する。
+
+    エントリー時点のtrade_plan（trade_plans テーブルに記録済みのもの）を、
+    実際に約定した positions 側にもコピーしておくことで、後から
+    「計画したRR/STOP/TARGET」と「実際の結果」を positions 単体で比較できる。
+    """
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(positions)")}
+    for col, typ in _TRADE_PLAN_POSITION_COLUMNS:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE positions ADD COLUMN {col} {typ}")
 
 
 def _migrate_positions_drop_symbol_unique(conn: sqlite3.Connection) -> None:
@@ -349,24 +402,35 @@ def insert_order(
     dry_run: bool = False,
     entry_path: str = "A",
     entry_signal: dict | None = None,
+    trade_plan: dict | None = None,
     db_path: Path = DB_PATH,
 ) -> None:
     """entry_signal: エントリー時点のスコア・surge値のスナップショット。
     {"score", "surge_score", "surge_signal", "surge_confirm_count", "reasons"} を想定（買い注文のみ）。
+
+    trade_plan: V2設計書 Phase1（Shadow Mode）のtrade_planスナップショット（観測専用、買い注文のみ）。
+    約定確認時にここから読み出してpositionsへコピーする。
     """
     sig = entry_signal or {}
+    plan = trade_plan or {}
     with _connect(db_path) as conn:
         conn.execute(
             """INSERT OR REPLACE INTO orders
                (order_id, symbol, symbol_name, side, qty, price, status,
                 ordered_at, created_at, dry_run, entry_path,
                 entry_score, entry_surge_score, entry_surge_signal,
-                entry_surge_confirm_count, entry_reasons)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                entry_surge_confirm_count, entry_reasons,
+                stop_price_initial, target_price_initial, risk_reward_ratio,
+                stop_reason, target_reason, initial_risk, entry_pattern, strategy_version)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                       ?, ?, ?, ?, ?, ?, ?, ?)""",
             (order_id, symbol, symbol_name, side, qty, price, status,
              ordered_at, _now(), int(dry_run), entry_path,
              sig.get("score"), sig.get("surge_score"), sig.get("surge_signal"),
-             sig.get("surge_confirm_count"), sig.get("reasons")),
+             sig.get("surge_confirm_count"), sig.get("reasons"),
+             plan.get("stop_price"), plan.get("target_price"), plan.get("risk_reward_ratio"),
+             plan.get("stop_reason"), plan.get("target_reason"), plan.get("risk_per_share"),
+             plan.get("entry_pattern"), plan.get("strategy_version")),
         )
 
 
@@ -414,24 +478,36 @@ def insert_position(
     dry_run: bool = False,
     entry_path: str = "A",
     entry_signal: dict | None = None,
+    trade_plan: dict | None = None,
     db_path: Path = DB_PATH,
 ) -> None:
     """entry_signal: エントリー時点のスコア・surge値のスナップショット。
     {"score", "surge_score", "surge_signal", "surge_confirm_count", "reasons"} を想定。
+
+    trade_plan: V2設計書 Phase1（Shadow Mode）のtrade_planスナップショット（観測専用）。
+    {"stop_price", "target_price", "risk_reward_ratio", "stop_reason", "target_reason",
+     "risk_per_share", "entry_pattern", "strategy_version"} を想定。売買判定には未使用。
     """
     sig = entry_signal or {}
+    plan = trade_plan or {}
     with _connect(db_path) as conn:
         conn.execute(
             """INSERT INTO positions
                (symbol, symbol_name, qty, entry_price, entry_order_id,
                 status, opened_at, dry_run, entry_path,
                 entry_score, entry_surge_score, entry_surge_signal,
-                entry_surge_confirm_count, entry_reasons)
-               VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?)""",
+                entry_surge_confirm_count, entry_reasons,
+                stop_price_initial, target_price_initial, risk_reward_ratio,
+                stop_reason, target_reason, initial_risk, entry_pattern, strategy_version)
+               VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, ?, ?, ?, ?, ?, ?,
+                       ?, ?, ?, ?, ?, ?, ?, ?)""",
             (symbol, symbol_name, qty, entry_price, entry_order_id,
              _now(), int(dry_run), entry_path,
              sig.get("score"), sig.get("surge_score"), sig.get("surge_signal"),
-             sig.get("surge_confirm_count"), sig.get("reasons")),
+             sig.get("surge_confirm_count"), sig.get("reasons"),
+             plan.get("stop_price"), plan.get("target_price"), plan.get("risk_reward_ratio"),
+             plan.get("stop_reason"), plan.get("target_reason"), plan.get("risk_per_share"),
+             plan.get("entry_pattern"), plan.get("strategy_version")),
         )
 
 
@@ -910,6 +986,26 @@ def update_candidate_outcome(candidate_id: str, fields: dict, db_path: Path = DB
         conn.execute(
             f"UPDATE candidate_outcomes SET {set_clause} WHERE candidate_id=?",
             (*fields.values(), candidate_id),
+        )
+
+
+# ─── Phase1: trade_plans（Shadow Mode） ────────────────────────────────────
+# 観測専用。rr_verdictは売買判定には一切使用しない（V2設計書 Phase1）。
+
+def insert_trade_plan(row: dict, db_path: Path = DB_PATH) -> None:
+    """trade_plans に1件追加する（1候補につき1回、更新はしない）。"""
+    cols = [
+        "candidate_id", "symbol", "signal_time", "entry_price",
+        "stop_price", "stop_reason", "target_price", "target_reason",
+        "risk_per_share", "reward_per_share", "risk_reward_ratio",
+        "rr_verdict", "strategy_version",
+    ]
+    values = [row.get(c) for c in cols]
+    placeholders = ", ".join("?" for _ in cols)
+    with _connect(db_path) as conn:
+        conn.execute(
+            f"INSERT OR IGNORE INTO trade_plans ({', '.join(cols)}) VALUES ({placeholders})",
+            values,
         )
 
 

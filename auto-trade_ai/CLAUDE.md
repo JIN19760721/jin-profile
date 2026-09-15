@@ -108,6 +108,9 @@ position_tracker.py（保有中監視）
 | `tdnet_fetcher.py` | TDnet適時開示の非公式スクレイピング（フェイルオープン） |
 | `signal_repository.py`（Phase0） | `signal_history` / `candidate_outcomes`への記録専用。売買判定には使わない |
 | `performance_analyzer.py`（Phase0） | Phase0観測データの成績集計（PF/MFE/MAE等） |
+| `trade_plan.py`（Phase1, Shadow Mode） | STOP/TARGET/RR算出の純粋関数。DB非依存、どこからも売買判定に接続しない |
+| `price_structure_fetch.py`（Phase1） | trade_plan用の補助データ取得（yfinanceの直近スイング安値/高値・前日高値・ATR、フェイルオープン+TTLキャッシュ） |
+| `trade_plan_repository.py`（Phase1） | `trade_plans`への記録専用。売買判定には使わない |
 | `scoring/` | スコアリング関連の補助モジュール群 |
 
 ### DBスキーマ概要（`data/trades.db`）
@@ -122,6 +125,7 @@ position_tracker.py（保有中監視）
 | `signal_history`（Phase0観測専用） | シグナル状態遷移の全記録。売買判定には影響しない |
 | `candidate_outcomes`（Phase0観測専用） | ENTRYしなかった候補も含む値動き追跡（MFE/MAE、5/10/15/30分後価格） |
 | `performance_snapshots`（Phase0観測専用） | 日次/累計の集計結果 |
+| `trade_plans`（Phase1観測専用, Shadow Mode） | 候補ごとのSTOP/TARGET/RR算出結果（`candidate_id`で`candidate_outcomes`と1:1対応、実際の値動きはJOINして参照する） |
 
 `check_db.py`・`analyze_today.py` はDB内容を素早く確認するための補助スクリプト。
 
@@ -130,7 +134,8 @@ position_tracker.py（保有中監視）
 このシステムは `docs/v2_design_phase0.md`（V2.0設計書）に沿って段階的に改修が進行中です。
 
 - **Phase0（実装済み）**: 現行ロジックを一切変更せず、`signal_history`/`candidate_outcomes`/`performance_snapshots`による観測基盤のみを追加。
-- **Phase1〜7（未実装）**: trade_plan/RR → entry_score_v2 → ENTRYパターン拡張 → 価格構造/VWAP → 時間帯/板/1H補正 → EXIT最適化（Rベース管理） → 地合い統合、の順で段階導入予定。全機能は`settings.yaml`の`features:`配下でFeature Flag管理（現状Phase0以外は全て`false`）。
+- **Phase1（Shadow Modeのみ実装済み）**: ENTRY候補ごとにSTOP/TARGET/RRを算出し`trade_plans`テーブルに記録する（`src/trade_plan.py` + `src/price_structure_fetch.py` + `src/trade_plan_repository.py`）。`enable_phase1_trade_plan: true`で計算・記録はONだが、`enable_rr_filter: false`のまま＝rr_verdictはtrade_engine.pyのどこからも参照されず実際のENTRY判定には未接続（`tests/test_phase1_regression.py`で静的に保証）。Active化（RRでの実ブロック）は、Shadow Modeで数週間分のデータを蓄積し妥当性を検証してから判断する。
+- **Phase2〜7（未実装）**: entry_score_v2 → ENTRYパターン拡張 → 価格構造/VWAP → 時間帯/板/1H補正 → EXIT最適化（Rベース管理） → 地合い統合、の順で段階導入予定。全機能は`settings.yaml`の`features:`配下でFeature Flag管理。
 
 新しいPhaseの実装に着手する際は、必ず設計書の該当セクションと「§17 段階導入」（Shadow Mode → Active の順）、「§20 Claude Codeへの実装指示」を確認すること。**一度に複数Phase・複数patternを有効化しない。**
 

@@ -38,6 +38,7 @@ class OrderManager:
         exchange: int = 1,
         entry_path: str = "D",
         entry_signal: dict | None = None,
+        trade_plan: dict | None = None,
     ) -> str | None:
         # 急騰中の未約定を防ぐため発注価格にバッファを上乗せ
         order_price = round(price * (1 + ORDER_PRICE_BUFFER_PCT / 100)) if price > 0 else price
@@ -48,11 +49,12 @@ class OrderManager:
             db.insert_order(
                 order_id, symbol, symbol_name, "BUY", qty, order_price,
                 "FILLED", ordered_at, dry_run=True, entry_path=entry_path,
-                entry_signal=entry_signal,
+                entry_signal=entry_signal, trade_plan=trade_plan,
             )
             db.insert_position(
                 symbol, symbol_name, qty, order_price, order_id,
                 dry_run=True, entry_path=entry_path, entry_signal=entry_signal,
+                trade_plan=trade_plan,
             )
             log.info(
                 "[DRY-RUN] 仮買い約定: %s %s %.0f円×%d株 (経路%s, バッファ後%.0f円)",
@@ -92,7 +94,7 @@ class OrderManager:
         db.insert_order(
             order_id, symbol, symbol_name, "BUY", qty, order_price,
             "PENDING", ordered_at, dry_run=False, entry_path=entry_path,
-            entry_signal=entry_signal,
+            entry_signal=entry_signal, trade_plan=trade_plan,
         )
         log.info(
             "買い注文発注: %s %s %.0f円×%d株 (経路%s, バッファ後%.0f円)",
@@ -242,6 +244,18 @@ class OrderManager:
                                         "surge_signal": order.get("entry_surge_signal"),
                                         "surge_confirm_count": order.get("entry_surge_confirm_count"),
                                         "reasons": order.get("entry_reasons"),
+                                    },
+                                    # V2設計書Phase1観測用(Shadow Mode): 発注時のtrade_planを
+                                    # ordersから読み出してpositionsへコピーするだけ（観測専用）。
+                                    trade_plan={
+                                        "stop_price": order.get("stop_price_initial"),
+                                        "target_price": order.get("target_price_initial"),
+                                        "risk_reward_ratio": order.get("risk_reward_ratio"),
+                                        "stop_reason": order.get("stop_reason"),
+                                        "target_reason": order.get("target_reason"),
+                                        "risk_per_share": order.get("initial_risk"),
+                                        "entry_pattern": order.get("entry_pattern"),
+                                        "strategy_version": order.get("strategy_version"),
                                     },
                                 )
                             else:

@@ -25,6 +25,7 @@ from src.config import (
     FORCE_CLOSE_TIME,
     ENTRY_LLM_CHECK_ENABLED,
     FEATURE_PHASE0_OBSERVABILITY,
+    FEATURE_PHASE1_TRADE_PLAN,
     ORDER_PRICE_BUFFER_PCT,
     ORDER_QTY,
     PATHD_ENABLED,
@@ -46,6 +47,9 @@ from src.config import (
 from src import premarket_llm_filter
 from src import entry_llm_check
 from src import signal_repository
+from src import price_structure_fetch
+from src import trade_plan as trade_plan_mod
+from src import trade_plan_repository
 from src.entry_policy import check as policy_check
 from src.kabu_client import KabuClient
 from src.order_manager import OrderManager
@@ -55,6 +59,7 @@ from src.ranking_fetcher import fetch_all_rankings
 from src.risk_manager import RiskManager
 from src.screener import merge_and_score
 from src.scoring.surge_score import calculate_surge_score
+from src.trade_plan import TradePlan
 
 log = logging.getLogger(__name__)
 
@@ -188,6 +193,9 @@ class TradeEngine:
         # V2設計書Phase0観測用: 本日entered=1を記録済みのsymbol（決済後の再候補出現による
         # entered=0への上書きを防ぐガード。売買判定には無関係、observability専用）
         self._candidate_entered_today: set[str] = set()
+        # V2設計書Phase1観測用(Shadow Mode): 本日計算済みのtrade_plan。symbol → TradePlan。
+        # ⑥のposition記録でスナップショットするためだけに保持し、売買判定には使わない。
+        self._trade_plans_today: dict[str, TradePlan] = {}
         # エントリー直前通知済みセット（同一銘柄の重複通知防止）
         self._pre_entry_notified: set[str] = set()
         db.init_db(DB_PATH)
@@ -516,6 +524,23 @@ class TradeEngine:
                     )
                     if cid:
                         self._candidate_ids_today[symbol] = cid
+                        # V2設計書Phase1観測用(Shadow Mode): STOP/TARGET/RRを計算して記録するだけ。
+                        # rr_verdictはどこからも売買判定に接続しない（下のエントリーループは無変更）。
+                        if FEATURE_PHASE1_TRADE_PLAN and cprice > 0:
+                            try:
+                                swing_low, swing_high = price_structure_fetch.get_swing_low_high(symbol)
+                                prev_day_high = price_structure_fetch.get_prev_day_high(symbol)
+                                atr = price_structure_fetch.get_atr(symbol)
+                                plan = trade_plan_mod.build_trade_plan(
+                                    symbol, cprice,
+                                    vwap=c.get("vwap"), day_high=c.get("day_high"),
+                                    swing_low=swing_low, swing_high=swing_high,
+                                    prev_day_high=prev_day_high, atr=atr,
+                                )
+                                trade_plan_repository.record_trade_plan(cid, symbol, plan)
+                                self._trade_plans_today[symbol] = plan
+                            except Exception as e:
+                                log.warning("trade_plan計算失敗（無視して継続） %s: %s", symbol, e)
 
         def _record_entry_outcome(
             symbol: str, c: dict, entered: bool, no_entry_reason: str | None,
@@ -583,6 +608,7 @@ class TradeEngine:
                 claude_reason=llm_reason if ENTRY_LLM_CHECK_ENABLED else None,
             )
 
+            plan = self._trade_plans_today.get(symbol)
             order_id = self._om.place_buy_order(
                 symbol, name, board_price, ORDER_QTY, entry_path=entry_path,
                 entry_signal={
@@ -592,6 +618,18 @@ class TradeEngine:
                     "surge_confirm_count": c.get("surge_confirm_count"),
                     "reasons": c.get("reasons"),
                 },
+                # V2設計書Phase1観測用(Shadow Mode): エントリー時点のtrade_planスナップショット。
+                # 発注可否の判定には一切使わない（下のif order_id以降は無変更）。
+                trade_plan={
+                    "stop_price": plan.stop_price,
+                    "target_price": plan.target_price,
+                    "risk_reward_ratio": plan.risk_reward_ratio,
+                    "stop_reason": plan.stop_reason,
+                    "target_reason": plan.target_reason,
+                    "risk_per_share": plan.risk_per_share,
+                    "entry_pattern": "PRE_SURGE_SETUP",
+                    "strategy_version": plan.strategy_version,
+                } if plan else None,
             )
             if order_id:
                 notifier.notify_order_placed(
@@ -743,6 +781,10 @@ class TradeEngine:
             cur_price      = float(board.get("CurrentPrice") or price)
             # ⑥エントリー時に板価格を使えるよう candidate dict に保存
             c["board_price"] = cur_price
+            # V2設計書Phase1観測用(Shadow Mode): trade_plan計算にそのまま使えるよう
+            # vwap/day_highも保存（既に取得済みの値を保存するだけ、追加通信なし）
+            c["vwap"] = vwap
+            c["day_high"] = day_high
 
             # 1 分足終値リスト: board価格履歴を使用（60秒ポーリング ≒ 1分足）
             price_cache.update(symbol, cur_price)

@@ -200,10 +200,13 @@ SIGNAL_WATCH: int              = int(_M.get("signal_watch", 55))
 BASELINE_DAILY_VOLUME: int     = int(_M.get("baseline_daily_volume", 1_000_000))
 
 # ── V2設計書（日本株デイトレード支援システムV2.0）Feature Flag ──────────────────
-# Phase0（計測基盤）以外は全てfalseで導入し、既存の売買判定には一切影響しない。
+# Phase0（計測基盤）・Phase1(Shadow Mode)以外は全てfalseで導入し、既存の売買判定には
+# 一切影響しない。FEATURE_RR_FILTERはどこからも参照しない＝物理的にENTRYをブロック
+# できない状態で運用する（Shadow Mode。trueにするのはPhase1 Active移行の判断後）。
 _F = _SETTINGS.get("features", {})
 
 FEATURE_PHASE0_OBSERVABILITY: bool = bool(_F.get("enable_phase0_observability", True))
+FEATURE_PHASE1_TRADE_PLAN: bool    = bool(_F.get("enable_phase1_trade_plan", True))
 FEATURE_RR_FILTER: bool            = bool(_F.get("enable_rr_filter", False))
 FEATURE_ENTRY_SCORE_V2: bool       = bool(_F.get("enable_entry_score_v2", False))
 FEATURE_OPENING_RANGE: bool        = bool(_F.get("enable_opening_range", False))
@@ -218,3 +221,13 @@ FEATURE_PARTIAL_TAKE_PROFIT: bool  = bool(_F.get("enable_partial_take_profit", F
 FEATURE_MARKET_FILTER: bool        = bool(_F.get("enable_market_filter", False))
 
 STRATEGY_VERSION: str = "v1_pathd"
+
+# ── Phase1 trade_plan（Shadow Mode）: STOP/TARGET/RR算出パラメータ ──────────────
+_RR = _SETTINGS.get("risk_reward", {})
+
+RR_MIN_RR_HARD: float       = float(_RR.get("min_rr_hard", 1.0))
+RR_MIN_RR_WATCH: float      = float(_RR.get("min_rr_watch", 1.5))
+RR_PREFERRED_RR: float      = float(_RR.get("preferred_rr", 2.0))
+RR_STOP_ATR_MULT: float     = float(_RR.get("stop_atr_mult", 1.5))
+RR_TARGET_ATR_MULT: float   = float(_RR.get("target_atr_mult", 2.0))
+RR_SWING_LOOKBACK_BARS: int = int(_RR.get("swing_lookback_bars", 12))

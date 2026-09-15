@@ -630,12 +630,12 @@ Phase0完了後は次に進まず、以下を報告：
 - [x] 基準成績
 - [x] Feature Flag
 
-### Phase 1
-- [ ] trade_plan
-- [ ] STOP/TARGET理由
-- [ ] RR
-- [ ] fallback
-- [ ] shadow mode
+### Phase 1（Shadow Modeのみ実装済み。enable_rr_filterはfalseのまま＝Active化は未実施）
+- [x] trade_plan（`src/trade_plan.py`）
+- [x] STOP/TARGET理由（フル優先順位: スイング安値/高値→VWAP→前日高値→ATR→固定%。ブレイクラインはPRE_SURGE_SETUPに概念上馴染まないため未実装、Phase3のBREAKOUT導入時に検討）
+- [x] RR（`trade_plans`テーブル、`positions`/`orders`にもスナップショット）
+- [x] fallback（価格構造データ取得不能時は既存の固定-2%/+5%へ自動フォールバック）
+- [x] shadow mode（`enable_phase1_trade_plan: true` / `enable_rr_filter: false`、rr_verdictはtrade_engine.pyのどこからも参照されず売買判定に不接続。静的回帰テスト`test_phase1_regression.py`で保証）
 
 ### Phase 2
 - [ ] entry_score_v2
