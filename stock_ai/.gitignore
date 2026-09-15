@@ -1,8 +1,0 @@
-.env
-__pycache__/
-*.pyc
-.venv/
-data/*.db
-excel/*.xlsx
-logs/*.log
-ngrok.exe

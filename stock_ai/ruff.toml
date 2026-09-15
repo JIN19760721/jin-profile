@@ -1,7 +1,0 @@
-line-length = 120
-
-[lint]
-select = ["E", "F", "I"]
-
-[lint.isort]
-combine-as-imports = true
