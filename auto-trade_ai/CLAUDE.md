@@ -105,7 +105,7 @@ position_tracker.py（保有中監視）
 | `price_cache.py` | 1分足価格履歴のキャッシュ（surge_score計算用） |
 | `notifier.py` | LINE通知の構築・送信 |
 | `watch_advisor.py` | ウォッチリスト銘柄の買い時/売り時アドバイス（`--advise`） |
-| `overnight_llm_advisor.py` | 翌日仕込み候補アドバイザー。15:15頃（東証引け前）に当日の値動き・出来高・TDnet開示からClaudeが翌日候補を選びLINE通知するだけの助言専用機能。自動発注・自動EXITなし、売買判定フローとは完全独立 |
+| `overnight_llm_advisor.py` | 翌日仕込み候補アドバイザー。強制クローズ検知時（`force_close_time`到達時、既定15:00）に当日の値動き・出来高・TDnet開示からClaudeが翌日候補を選びLINE通知するだけの助言専用機能。自動発注・自動EXITなし、売買判定フローとは完全独立。プロセスは`force_close_time`到達時に`SystemExit`で終了するため専用の実行時刻は持たず、強制クローズ検知に相乗りする形で実行される |
 | `tdnet_fetcher.py` | TDnet適時開示の非公式スクレイピング（フェイルオープン） |
 | `signal_repository.py`（Phase0） | `signal_history` / `candidate_outcomes`への記録専用。売買判定には使わない |
 | `performance_analyzer.py`（Phase0） | Phase0観測データの成績集計（PF/MFE/MAE等） |

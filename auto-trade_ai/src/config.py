@@ -104,11 +104,12 @@ PRE_MARKET_LLM_DISCLOSURE_ENABLED: bool     = bool(_T.get("pre_market_llm_disclo
 PRE_MARKET_LLM_DISCLOSURE_AFTER_HOUR: int   = int(_T.get("pre_market_llm_disclosure_after_hour", 15))
 # モメンタム候補外から開示のみで追加補完する銘柄数の上限
 PRE_MARKET_LLM_DISCLOSURE_MAX_EXTRAS: int   = int(_T.get("pre_market_llm_disclosure_max_extras", 15))
-# 翌日仕込み候補アドバイザー: 15:15頃（東証引け前）に当日の値動き・出来高データと
-# TDnet開示（PRE_MARKET_LLM_DISCLOSURE_*を共用）から翌日に向けて仕込む価値がありそうな
-# 銘柄をClaudeに選ばせ、LINE通知するだけの助言専用機能。自動発注・自動EXITは行わない。
+# 翌日仕込み候補アドバイザー: 強制クローズ検知時（FORCE_CLOSE_TIME到達時、既定15:00）に
+# 当日の値動き・出来高データとTDnet開示（PRE_MARKET_LLM_DISCLOSURE_*を共用）から翌日に
+# 向けて仕込む価値がありそうな銘柄をClaudeに選ばせ、LINE通知するだけの助言専用機能。
+# 自動発注・自動EXITは行わない。プロセスがFORCE_CLOSE_TIME到達時にSystemExitで終了する
+# ため、専用の実行時刻は持たず強制クローズ検知に相乗りする（trade_engine.py参照）。
 OVERNIGHT_ADVISOR_ENABLED: bool       = bool(_T.get("overnight_advisor_enabled", True))
-OVERNIGHT_ADVISOR_TIME: str           = str(_T.get("overnight_advisor_time", "15:15"))
 OVERNIGHT_ADVISOR_MODEL: str          = str(_T.get("overnight_advisor_model", "claude-opus-4-8"))
 OVERNIGHT_ADVISOR_UNIVERSE_SIZE: int  = int(_T.get("overnight_advisor_universe_size", 25))
 OVERNIGHT_ADVISOR_TOP_N: int          = int(_T.get("overnight_advisor_top_n", 10))

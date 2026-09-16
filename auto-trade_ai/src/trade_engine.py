@@ -29,7 +29,6 @@ from src.config import (
     ORDER_PRICE_BUFFER_PCT,
     ORDER_QTY,
     OVERNIGHT_ADVISOR_ENABLED,
-    OVERNIGHT_ADVISOR_TIME,
     PATHD_ENABLED,
     PATHD_MIN_VOLUME_SPIKE,
     PATHD_CONFIRM_MIN,
@@ -247,7 +246,6 @@ class TradeEngine:
                 if tick_count % ticks_per_scan == 0:
                     self._pt.refresh_claude_judgments()
                     self._tick_entries()
-                    self._maybe_run_overnight_advisor()
                 time.sleep(POSITION_CHECK_INTERVAL_SEC)
         except KeyboardInterrupt:
             log.info("手動中断を検出しました。")
@@ -297,19 +295,19 @@ class TradeEngine:
             log.error("yfinance 事前スキャン 失敗: %s", e)
 
     def _maybe_run_overnight_advisor(self) -> None:
-        """翌日仕込み候補アドバイザーを1日1回、OVERNIGHT_ADVISOR_TIME（既定15:15）以降に実行する。
+        """翌日仕込み候補アドバイザーを1日1回実行する。
 
         助言専用（自動発注・自動EXITなし）。売買判定フローとは完全に独立しており、
         ここで例外が起きてもメインループには一切影響させない（フェイルオープン）。
-        premarket系の _run_llm_premarket_filter と異なり、これは常時ループの中で
-        毎tick呼ばれる想定のため、時刻未到達なら即returnするだけで待機はしない。
+
+        呼び出しタイミングについて: 当初は独立した時刻（OVERNIGHT_ADVISOR_TIME）で
+        メインループから毎tick判定する設計だったが、_tick_positions() の強制クローズ
+        検知が FORCE_CLOSE_TIME 到達時に raise SystemExit(0) でプロセスを即終了させる
+        ため、それより後の時刻を狙う設計では実行チャンスが一度も来ないことが判明した
+        （実運用ログで確認）。そのため強制クローズ検知の直後・force_close_all() や
+        約定確認待ちより前でこのメソッドを呼び出す方式に変更した。
         """
         if not OVERNIGHT_ADVISOR_ENABLED or self._overnight_advisor_done:
-            return
-
-        now_min = _hhmm_to_minutes(*_now_hhmm())
-        target_min = _hhmm_to_minutes(*_parse_hhmm(OVERNIGHT_ADVISOR_TIME))
-        if now_min < target_min:
             return
 
         self._overnight_advisor_done = True
@@ -385,6 +383,9 @@ class TradeEngine:
         # ① 強制クローズチェック
         if _is_past_or_equal(FORCE_CLOSE_TIME):
             log.info("[%s] 強制クローズ時刻を過ぎました。全ポジションをクローズします。", now_str)
+            # このあとプロセスはSystemExitで終了するため、force_close_all()や
+            # 約定確認待ちより先に翌日仕込み候補アドバイザーの通知を出し切る。
+            self._maybe_run_overnight_advisor()
             closed = self._pt.force_close_all(self._om)
             for pos in closed:
                 notifier.notify_closed(

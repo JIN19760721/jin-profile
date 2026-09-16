@@ -43,12 +43,14 @@ trade:
   pre_market_llm_disclosure_after_hour: 15     # 前営業日のこの時刻以降の開示を「引け後」として加味
   pre_market_llm_disclosure_max_extras: 15     # モメンタム候補外から開示のみで補完する銘柄数の上限
   watch_advisor_model: "claude-opus-4-8"       # ウォッチリスト買い時・売り時アドバイス（--advise）で使うモデル
-  # 翌日仕込み候補アドバイザー: 15:15頃（東証引け15:30より前）に当日の値動き・出来高データと
-  # TDnet開示から翌日に向けて仕込む価値がありそうな銘柄をClaudeに選ばせ、LINE通知するだけの
-  # 助言専用機能。自動発注・自動EXITは一切行わない。TDnet開示の加味はpre_market_llm_disclosure_*
-  # を共用する（引け後専用の新規開示はほぼ拾えない点に留意）。
+  # 翌日仕込み候補アドバイザー: 強制クローズ検知時（force_close_time到達時）に当日の
+  # 値動き・出来高データとTDnet開示から翌日に向けて仕込む価値がありそうな銘柄をClaudeに
+  # 選ばせ、LINE通知するだけの助言専用機能。自動発注・自動EXITは一切行わない。
+  # TDnet開示の加味はpre_market_llm_disclosure_*を共用する（引け後専用の新規開示は
+  # ほぼ拾えない点に留意）。プロセスはforce_close_time到達時に終了するため、専用の
+  # 実行時刻設定は持たない（force_close_timeより後に間に合わせたい場合はforce_close_time
+  # 自体を早める必要がある）。
   overnight_advisor_enabled: true       # false でこの機能を無効化
-  overnight_advisor_time: "15:15"       # 実行時刻。東証引け(15:30)前に間に合わせる
   overnight_advisor_model: "claude-opus-4-8"
   overnight_advisor_universe_size: 25   # Claudeに提示する候補数（score上位から）
   overnight_advisor_top_n: 10           # Claudeに選ばせる件数
