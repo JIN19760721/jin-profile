@@ -69,6 +69,31 @@ def test_target_falls_to_min_rr_when_no_price_structure_or_atr():
     assert (price, reason) == (1000 + 20 * 2.0, "min_rr")
 
 
+def test_target_skips_swing_high_too_close_falls_to_day_high():
+    # entry=1000, 最低ライン0.5%=5円。swing_highのreward=3円は満たさないため次点へ。
+    price, reason = _pick_target(
+        1000, swing_high=1003, day_high=1020, prev_day_high=None, atr=10, risk_per_share=20,
+    )
+    assert (price, reason) == (1020, "day_or_prev_high")
+
+
+def test_target_skips_day_high_too_close_falls_to_atr():
+    price, reason = _pick_target(
+        1000, swing_high=None, day_high=1002, prev_day_high=1001, atr=10, risk_per_share=20,
+    )
+    assert (price, reason) == (1000 + 10 * 2.0, "atr")
+
+
+def test_target_reproduces_observed_low_rr_case_now_falls_to_atr():
+    # 実運用で観測されたケース: entry=775, swing_high=777(reward=2円)は
+    # 最低ライン(775*0.5%=3.875円)を満たさずATRへフォールバックするべき。
+    price, reason = _pick_target(
+        775, swing_high=777, day_high=None, prev_day_high=None, atr=8, risk_per_share=19,
+    )
+    assert reason == "atr"
+    assert price == 775 + 8 * 2.0
+
+
 def test_target_falls_to_fixed_pct_when_nothing_available():
     price, reason = _pick_target(
         1000, swing_high=None, day_high=None, prev_day_high=None, atr=None, risk_per_share=None,
@@ -154,6 +179,9 @@ if __name__ == "__main__":
     test_target_falls_to_lower_of_day_or_prev_high_above_entry()
     test_target_ignores_day_high_below_entry()
     test_target_falls_to_min_rr_when_no_price_structure_or_atr()
+    test_target_skips_swing_high_too_close_falls_to_day_high()
+    test_target_skips_day_high_too_close_falls_to_atr()
+    test_target_reproduces_observed_low_rr_case_now_falls_to_atr()
     test_target_falls_to_fixed_pct_when_nothing_available()
     test_rr_verdict_boundaries()
     test_build_trade_plan_all_fallback()

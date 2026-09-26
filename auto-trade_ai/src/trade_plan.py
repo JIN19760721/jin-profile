@@ -10,6 +10,14 @@ TARGET候補優先順位: 直近スイング高値 → 当日/前日高値 → A
 （「ブレイクライン」は現行のPRE_SURGE_SETUP＝価格未動パターンには概念的に馴染まないため
  Phase1では実装しない。Phase3でBREAKOUTパターンを導入する際に検討する。）
 
+TARGET候補の最小距離チェックについて: PRE_SURGE_SETUP（価格未動）の性質上、
+直近スイング高値・当日/前日高値は現在値のすぐ近くにあることが構造的に多く、
+無条件で採用するとreward_per_shareが1〜2円程度しかない不当に低いRRを量産して
+しまうことが実運用データ（2026-09時点、エントリーされた5件全てがRR<1.0）で
+判明した。そのためこれらの候補は reward_per_share が entry_price の
+RR_MIN_TARGET_REWARD_PCT% 未満の場合は採用せず、次の優先順位（ATR→最低RR逆算）
+へフォールバックする。
+
 各値が取得できない場合は推測せず None を返す（P4: 取得不能は理由として報告する）。
 """
 
@@ -20,6 +28,7 @@ from dataclasses import dataclass
 from src.config import (
     RR_MIN_RR_HARD,
     RR_MIN_RR_WATCH,
+    RR_MIN_TARGET_REWARD_PCT,
     RR_PREFERRED_RR,
     RR_STOP_ATR_MULT,
     RR_TARGET_ATR_MULT,
@@ -71,9 +80,14 @@ def _pick_target(
     atr: float | None,
     risk_per_share: float | None,
 ) -> tuple[float, str]:
-    if swing_high is not None and swing_high > entry_price:
+    min_reward = entry_price * RR_MIN_TARGET_REWARD_PCT / 100
+
+    if swing_high is not None and swing_high - entry_price >= min_reward:
         return swing_high, "recent_resistance"
-    candidates = [v for v in (day_high, prev_day_high) if v is not None and v > entry_price]
+    candidates = [
+        v for v in (day_high, prev_day_high)
+        if v is not None and v - entry_price >= min_reward
+    ]
     if candidates:
         return min(candidates), "day_or_prev_high"
     if atr is not None and atr > 0:

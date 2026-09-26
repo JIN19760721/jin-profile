@@ -637,6 +637,22 @@ Phase0完了後は次に進まず、以下を報告：
 - [x] fallback（価格構造データ取得不能時は既存の固定-2%/+5%へ自動フォールバック）
 - [x] shadow mode（`enable_phase1_trade_plan: true` / `enable_rr_filter: false`、rr_verdictはtrade_engine.pyのどこからも参照されず売買判定に不接続。静的回帰テスト`test_phase1_regression.py`で保証）
 
+**2026-09-24時点のShadow Mode観測結果とActive化判断への示唆**:
+実際にエントリーされた候補（5件）は**全件**rr_verdictが`NO_ENTRY`（RR<1.0）だった一方、
+RRが良好（HIGH）だった候補は一件もエントリーされていない（RISK_NG/POLICY_NGなど
+RRと無関係な理由で見送り）。原因は、PRE_SURGE_SETUP（価格未動）では直近抵抗線・
+当日/前日高値が現在値のすぐ近くにあることが構造的に多く、TARGET候補として無条件
+採用するとreward_per_shareが1〜2円程度しかない不当に低いRRを量産していたため
+（`_pick_target`に最低距離チェック`RR_MIN_TARGET_REWARD_PCT`を追加して対処済み）。
+
+また全88件中35件（40%）がSTOP/TARGET到達ではなくSTALL_TIMEOUT（時間切れ）で
+決済されており、RRという「STOP/TARGET到達」前提の指標が、このシステムの実際の
+主要EXIT手段とは前提がズレている可能性がある。**そのためenable_rr_filterを
+Active化する前に、TARGET最低距離チェック適用後のShadow Modeデータを改めて
+数週間分観測すること、また Phase1 Active化より先に Phase6（Rベース管理・
+STALL複合条件化）に着手する方がこのシステムの実態に合っている可能性が高いことを
+記録しておく。**
+
 ### Phase 2
 - [ ] entry_score_v2
 - [ ] surge_score分離

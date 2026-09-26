@@ -135,8 +135,10 @@ position_tracker.py（保有中監視）
 このシステムは `docs/v2_design_phase0.md`（V2.0設計書）に沿って段階的に改修が進行中です。
 
 - **Phase0（実装済み）**: 現行ロジックを一切変更せず、`signal_history`/`candidate_outcomes`/`performance_snapshots`による観測基盤のみを追加。
-- **Phase1（Shadow Modeのみ実装済み）**: ENTRY候補ごとにSTOP/TARGET/RRを算出し`trade_plans`テーブルに記録する（`src/trade_plan.py` + `src/price_structure_fetch.py` + `src/trade_plan_repository.py`）。`enable_phase1_trade_plan: true`で計算・記録はONだが、`enable_rr_filter: false`のまま＝rr_verdictはtrade_engine.pyのどこからも参照されず実際のENTRY判定には未接続（`tests/test_phase1_regression.py`で静的に保証）。Active化（RRでの実ブロック）は、Shadow Modeで数週間分のデータを蓄積し妥当性を検証してから判断する。
-- **Phase2〜7（未実装）**: entry_score_v2 → ENTRYパターン拡張 → 価格構造/VWAP → 時間帯/板/1H補正 → EXIT最適化（Rベース管理） → 地合い統合、の順で段階導入予定。全機能は`settings.yaml`の`features:`配下でFeature Flag管理。
+- **Phase1（Shadow Modeのみ実装済み）**: ENTRY候補ごとにSTOP/TARGET/RRを算出し`trade_plans`テーブルに記録する（`src/trade_plan.py` + `src/price_structure_fetch.py` + `src/trade_plan_repository.py`）。`enable_phase1_trade_plan: true`で計算・記録はONだが、`enable_rr_filter: false`のまま＝rr_verdictはtrade_engine.pyのどこからも参照されず実際のENTRY判定には未接続（`tests/test_phase1_regression.py`で静的に保証）。
+  - **2026-09-24時点の観測結果**: 実際にエントリーされた候補が全件RR<1.0（`NO_ENTRY`）だった一方、RR良好な候補は一件もエントリーされていなかった。原因はPRE_SURGE_SETUPでは直近抵抗線が現在値のすぐ近くにあり、TARGET候補として無条件採用するとRRを不当に悪化させていたため（`RR_MIN_TARGET_REWARD_PCT`の最低距離チェックで対処済み）。詳細は`docs/v2_design_phase0.md`のPhase1セクション参照。
+  - Active化（RRでの実ブロック）は、この修正を踏まえてShadow Modeで数週間分のデータを再度蓄積し妥当性を検証してから判断する。全88件中35件（40%）がSTOP/TARGET到達ではなくSTALL_TIMEOUTで決済されている実態を踏まえると、**Phase1 Active化より先にPhase6（Rベース管理・STALL複合条件化）に着手する方がこのシステムの実態に合っている可能性が高い**。
+- **Phase2〜7（未実装）**: entry_score_v2 → ENTRYパターン拡張 → 価格構造/VWAP → 時間帯/板/1H補正 → EXIT最適化（Rベース管理） → 地合い統合、の順で段階導入予定だが、上記の理由からPhase6を先に検討する余地がある。全機能は`settings.yaml`の`features:`配下でFeature Flag管理。
 
 新しいPhaseの実装に着手する際は、必ず設計書の該当セクションと「§17 段階導入」（Shadow Mode → Active の順）、「§20 Claude Codeへの実装指示」を確認すること。**一度に複数Phase・複数patternを有効化しない。**
 

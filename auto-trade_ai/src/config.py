@@ -240,3 +240,8 @@ RR_PREFERRED_RR: float      = float(_RR.get("preferred_rr", 2.0))
 RR_STOP_ATR_MULT: float     = float(_RR.get("stop_atr_mult", 1.5))
 RR_TARGET_ATR_MULT: float   = float(_RR.get("target_atr_mult", 2.0))
 RR_SWING_LOOKBACK_BARS: int = int(_RR.get("swing_lookback_bars", 12))
+# 直近スイング高値・当日/前日高値をTARGETとして採用する最低条件
+# （entry_priceに対する%）。PRE_SURGE_SETUPでは近すぎる抵抗線を無条件採用すると
+# reward_per_shareがほぼゼロになりRRを不当に悪化させるため、満たさなければATRへ
+# フォールバックする（2026-09の実運用データで判明した問題への対応）。
+RR_MIN_TARGET_REWARD_PCT: float = float(_RR.get("min_target_reward_pct", 0.5))

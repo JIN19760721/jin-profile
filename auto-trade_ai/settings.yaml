@@ -121,3 +121,8 @@ risk_reward:
   stop_atr_mult: 1.5      # ATRベースSTOP: entry - ATR * この倍率
   target_atr_mult: 2.0    # ATRベースTARGET: entry + ATR * この倍率
   swing_lookback_bars: 12 # 直近スイング安値/高値を計算する5分足の本数（既定12本≒1時間）
+  # PRE_SURGE_SETUP（価格未動）は直近抵抗線が現在値のすぐ近くにあることが多く、
+  # 無条件採用するとreward_per_shareがほぼゼロになりRRを不当に悪化させることが
+  # 実運用データ（2026-09、エントリー5件全てRR<1.0）で判明した。この最低ライン
+  # （entry_priceに対する%）を満たさない場合はATR/最低RR逆算へフォールバックする。
+  min_target_reward_pct: 0.5
