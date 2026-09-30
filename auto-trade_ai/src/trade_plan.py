@@ -18,6 +18,13 @@ TARGET候補の最小距離チェックについて: PRE_SURGE_SETUP（価格未
 RR_MIN_TARGET_REWARD_PCT% 未満の場合は採用せず、次の優先順位（ATR→最低RR逆算）
 へフォールバックする。
 
+STOP候補の最小距離チェックについて: 上記と鏡写しの問題として、直近スイング安値
+等がエントリー価格のほぼ真上（risk_per_shareがごく小さい値）になるケースがあり、
+この場合RRが数万〜数十万倍という無意味な値になることが実運用データ（2026-09末、
+RR=884734等）で判明した。呼び値1枚分程度しか離れていないストップはノイズで
+簡単に刈られる「見せかけの高RR」を生むため、risk_per_shareが entry_price の
+RR_MIN_STOP_RISK_PCT% 未満の候補（ATR含む）は採用せず固定%フォールバックへ進む。
+
 各値が取得できない場合は推測せず None を返す（P4: 取得不能は理由として報告する）。
 """
 
@@ -28,6 +35,7 @@ from dataclasses import dataclass
 from src.config import (
     RR_MIN_RR_HARD,
     RR_MIN_RR_WATCH,
+    RR_MIN_STOP_RISK_PCT,
     RR_MIN_TARGET_REWARD_PCT,
     RR_PREFERRED_RR,
     RR_STOP_ATR_MULT,
@@ -59,15 +67,17 @@ def _pick_stop(
     prev_day_high: float | None,
     atr: float | None,
 ) -> tuple[float, str]:
-    if swing_low is not None and 0 < swing_low < entry_price:
+    min_risk = entry_price * RR_MIN_STOP_RISK_PCT / 100
+
+    if swing_low is not None and 0 < swing_low < entry_price and entry_price - swing_low >= min_risk:
         return swing_low, "recent_swing_low"
-    if vwap is not None and 0 < vwap < entry_price:
+    if vwap is not None and 0 < vwap < entry_price and entry_price - vwap >= min_risk:
         return vwap, "vwap"
-    if prev_day_high is not None and 0 < prev_day_high < entry_price:
+    if prev_day_high is not None and 0 < prev_day_high < entry_price and entry_price - prev_day_high >= min_risk:
         return prev_day_high, "prev_day_high_broken"
     if atr is not None and atr > 0:
         candidate = entry_price - atr * RR_STOP_ATR_MULT
-        if candidate > 0:
+        if candidate > 0 and entry_price - candidate >= min_risk:
             return candidate, "atr"
     return entry_price * (1 + STOP_LOSS_PCT_D / 100), "fallback_pct"
 

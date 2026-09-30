@@ -39,6 +39,24 @@ def test_stop_falls_to_fixed_pct_when_nothing_available():
     assert (round(price, 2), reason) == (980.0, "fallback_pct")
 
 
+def test_stop_skips_swing_low_too_close_falls_to_vwap():
+    # entry=1000, 最低ライン0.5%=5円。swing_lowのrisk=2円は満たさないため次点へ。
+    price, reason = _pick_stop(1000, swing_low=998, vwap=970, prev_day_high=None, atr=10)
+    assert (price, reason) == (970, "vwap")
+
+
+def test_stop_skips_all_too_close_falls_to_atr():
+    price, reason = _pick_stop(1000, swing_low=999, vwap=997, prev_day_high=996, atr=10)
+    assert (price, reason) == (1000 - 10 * 1.5, "atr")
+
+
+def test_stop_reproduces_observed_huge_rr_case_now_falls_to_fallback():
+    # 実運用で観測されたケース: swing_lowがentryのほぼ真上(risk=0.5円)で採用すると
+    # RRが数十万倍という無意味な値になっていた。最低ライン未満なら固定%へ進むべき。
+    price, reason = _pick_stop(1000, swing_low=999.5, vwap=None, prev_day_high=None, atr=None)
+    assert (round(price, 2), reason) == (980.0, "fallback_pct")
+
+
 # ─── TARGET優先順位 ─────────────────────────────────────────────────────────
 
 def test_target_prefers_swing_high():
@@ -175,6 +193,9 @@ if __name__ == "__main__":
     test_stop_falls_to_prev_day_high_when_no_swing_or_vwap()
     test_stop_falls_to_atr_when_no_price_structure()
     test_stop_falls_to_fixed_pct_when_nothing_available()
+    test_stop_skips_swing_low_too_close_falls_to_vwap()
+    test_stop_skips_all_too_close_falls_to_atr()
+    test_stop_reproduces_observed_huge_rr_case_now_falls_to_fallback()
     test_target_prefers_swing_high()
     test_target_falls_to_lower_of_day_or_prev_high_above_entry()
     test_target_ignores_day_high_below_entry()

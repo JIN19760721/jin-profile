@@ -245,3 +245,8 @@ RR_SWING_LOOKBACK_BARS: int = int(_RR.get("swing_lookback_bars", 12))
 # reward_per_shareがほぼゼロになりRRを不当に悪化させるため、満たさなければATRへ
 # フォールバックする（2026-09の実運用データで判明した問題への対応）。
 RR_MIN_TARGET_REWARD_PCT: float = float(_RR.get("min_target_reward_pct", 0.5))
+# 直近スイング安値・VWAP・前日高値・ATRをSTOPとして採用する最低条件
+# （entry_priceに対する%）。近すぎるストップ（risk_per_shareがほぼゼロ）を
+# 無条件採用するとRRが数万倍という無意味な値になるため、満たさなければ
+# 固定%フォールバックへ進む（2026-09末の実運用データで判明した問題への対応）。
+RR_MIN_STOP_RISK_PCT: float = float(_RR.get("min_stop_risk_pct", 0.5))
