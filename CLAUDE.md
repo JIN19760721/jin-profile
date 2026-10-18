@@ -8,7 +8,7 @@ This is a monorepo containing several independent projects. Each active project 
 
 ```
 C:\claude\
-├── auto-trade_ai/         # 日本株デイトレード自動売買システム（本番運用中・メインプロジェクト）
+├── auto-trade_ai/         # 別リポジトリ（非公開）。このリポジトリでは.gitignoreで除外している
 │                           # 詳細は auto-trade_ai/CLAUDE.md を参照
 ├── english-learning-app/  # 英語学習アプリ。詳細は english-learning-app/CLAUDE.md（@AGENTS.md）を参照
 ├── word-chain/            # 小規模な単体HTML（index.htmlのみ）。しりとりアプリ等の実験用
@@ -23,6 +23,6 @@ C:\claude\
 
 ### 各プロジェクトの詳細
 
-- **auto-trade_ai** — 開発コマンド・アーキテクチャ・DBスキーマ・Phaseロードマップ等は `auto-trade_ai/CLAUDE.md` を参照。V2設計書全文は `auto-trade_ai/docs/v2_design_phase0.md`。
+- **auto-trade_ai** — 2026-10-19に独立した非公開リポジトリ `JIN19760721/auto-trade-ai` へ移行した（`C:\claude\auto-trade_ai` がそのクローン）。このリポジトリ（jin-profile、公開）からは履歴ごと削除済みのため、**auto-trade_ai配下の変更はこのリポジトリにコミット・pushしないこと**。git操作は `auto-trade_ai/` 内で行う。開発コマンド等は `auto-trade_ai/CLAUDE.md` を参照。
 - **english-learning-app** — `english-learning-app/CLAUDE.md`（`@AGENTS.md`を読み込む形式）を参照。
 - **word-chain / studyeng_ai** — 現状ドキュメント化するほどの実体がない小規模/空ディレクトリ。作業対象になった場合は都度確認すること。
