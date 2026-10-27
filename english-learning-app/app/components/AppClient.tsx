@@ -3,7 +3,7 @@ import { useState } from "react";
 import ModeSelect      from "./ModeSelect";
 import EikaiwaMode     from "./EikaiwaMode";
 import TOEICMode       from "./TOEICMode";
-import EikenMode       from "./EikenMode";
+import EikenMode       from "./eiken/EikenMode";
 import DictionaryMode  from "./DictionaryMode";
 import RankingMode     from "./RankingMode";
 import type { Word, Phrase } from "../data/vocabulary";
