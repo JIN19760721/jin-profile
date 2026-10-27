@@ -46,3 +46,5 @@ next-env.d.ts
 /data/en_frequency.txt
 
 .vercel
+
+.env*
