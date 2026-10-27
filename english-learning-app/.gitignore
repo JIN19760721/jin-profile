@@ -48,3 +48,7 @@ next-env.d.ts
 .vercel
 
 .env*
+
+# SQLite の一時ファイル
+/data/vocabulary.db-shm
+/data/vocabulary.db-wal

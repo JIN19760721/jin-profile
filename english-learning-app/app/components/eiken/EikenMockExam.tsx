@@ -4,8 +4,8 @@ import {
   EIKEN_SECTION1_PATTERNS,
   EIKEN_SECTION2_PATTERNS,
   EIKEN_SECTION3_PATTERNS,
-} from "../data/eiken";
-import type { StudyHistory, QuizRecord } from "../hooks/useStudyHistory";
+} from "../../data/eiken";
+import type { StudyHistory, QuizRecord } from "../../hooks/useStudyHistory";
 
 type Phase = "home" | "test";
 type SectionKey = "s1" | "s2" | "s3";
@@ -87,7 +87,7 @@ interface Props {
   onBack:    () => void;
 }
 
-export default function EikenMode({ history, addRecord, onBack }: Props) {
+export default function EikenMockExam({ history, addRecord, onBack }: Props) {
   const [phase, setPhase] = useState<Phase>("home");
   const [patternIdx, setPatternIdx] = useState({ s1: 0, s2: 0, s3: 0 });
   const [answers, setAnswers] = useState<Record<string, number>>({});

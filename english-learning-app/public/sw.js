@@ -1,4 +1,4 @@
-const CACHE = "eigo-master-v2";
+const CACHE = "eigo-master-v3";
 const PRECACHE = ["/", "/icons/icon-192x192.png", "/icons/icon-512x512.png"];
 
 self.addEventListener("install", (e) => {
@@ -25,7 +25,22 @@ self.addEventListener("fetch", (e) => {
     );
     return;
   }
-  // Cache-first for static assets, stale-while-revalidate for pages
+  // Network-first for pages so a new deploy is picked up immediately (cache only when offline)
+  if (e.request.mode === "navigate") {
+    e.respondWith(
+      fetch(e.request)
+        .then((res) => {
+          if (res.ok) {
+            const clone = res.clone();
+            caches.open(CACHE).then((c) => c.put(e.request, clone));
+          }
+          return res;
+        })
+        .catch(() => caches.match(e.request).then((cached) => cached || caches.match("/")))
+    );
+    return;
+  }
+  // Cache-first for static assets
   e.respondWith(
     caches.match(e.request).then((cached) => {
       const network = fetch(e.request).then((res) => {
