@@ -22,6 +22,20 @@ interface KV {
   pushList(key: string, value: string, max: number): Promise<void>;
 }
 
+/** Redis に接続できないときは LimitUnavailableError にそろえる（AI機能を止める合図） */
+function guarded(kv: KV): KV {
+  const wrap = <A extends unknown[], R>(fn: (...a: A) => Promise<R>) => async (...a: A): Promise<R> => {
+    try { return await fn(...a); } catch (e) {
+      console.error("[eiken limits] redis error", e);
+      throw new LimitUnavailableError("Redis is unavailable");
+    }
+  };
+  return {
+    incr: wrap(kv.incr), decr: wrap(kv.decr), setNx: wrap(kv.setNx), del: wrap(kv.del),
+    getList: wrap(kv.getList), pushList: wrap(kv.pushList),
+  };
+}
+
 function redisKV(redis: Redis): KV {
   return {
     async incr(key, ttl) {
@@ -78,7 +92,8 @@ function getKV(): KV {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
   if (url && token) {
-    kv = redisKV(new Redis({ url, token }));
+    // つながらないときに長く待たせないよう、再試行は1回だけ
+    kv = guarded(redisKV(new Redis({ url, token, retry: { retries: 1, backoff: () => 200 } })));
   } else if (process.env.NODE_ENV !== "production") {
     kv = memKV;
   } else {
