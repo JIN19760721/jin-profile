@@ -63,16 +63,23 @@ export function tagItems(tag: WeaknessTag, n = 6): DrillItem[] {
   return [...items, ...basicItems([tag], [], n - items.length, 0)].slice(0, n);
 }
 
-/** 次に書く英作文の問題（復習期限が来た問題 → まだ書いていない問題 → 点数が低かった問題） */
-export function nextQuestion(attempts: WritingAttempt[], aiQuestions: WritingQuestion[], dueQuestionIds: string[]): WritingQuestion {
+/**
+ * 次に書く英作文の問題（復習期限が来た問題 → まだ書いていない問題 → 点数が低かった問題）。
+ * 毎回同じ問題にならないよう、候補の中からランダムに選ぶ
+ */
+export function nextQuestion(
+  attempts: WritingAttempt[], aiQuestions: WritingQuestion[], dueQuestionIds: string[], rand: () => number = Math.random,
+): WritingQuestion {
   const all = [...WRITING_QUESTIONS, ...aiQuestions];
-  for (const id of dueQuestionIds) {
-    const q = all.find((x) => x.id === id);
-    if (q) return q;
-  }
+  const choose = <T,>(a: T[]) => a[Math.floor(rand() * a.length)];
+  const due = all.filter((q) => dueQuestionIds.includes(q.id));
+  if (due.length > 0) return choose(due);
   const written = new Set(attempts.map((a) => a.questionId));
   const unwritten = WRITING_QUESTIONS.filter((q) => !written.has(q.id));
-  if (unwritten.length > 0) return unwritten[0];
-  const byScore = [...attempts].sort((a, b) => (a.rounds.at(-1)?.result.total ?? 0) - (b.rounds.at(-1)?.result.total ?? 0));
-  return all.find((q) => q.id === byScore[0]?.questionId) ?? WRITING_QUESTIONS[0];
+  if (unwritten.length > 0) return choose(unwritten);
+  // 全部書いたら、問題ごとの最新の点数が低い5問から選ぶ
+  const latest = new Map<string, number>();
+  for (const a of attempts) latest.set(a.questionId, a.rounds.at(-1)?.result.total ?? 0);
+  const low = all.filter((q) => latest.has(q.id)).sort((a, b) => latest.get(a.id)! - latest.get(b.id)!).slice(0, 5);
+  return low.length > 0 ? choose(low) : choose(WRITING_QUESTIONS);
 }
